@@ -125,21 +125,28 @@ function App() {
         </div>
       </header>
 
-      {profile && (
-        <div className="profile-bar">
-          <div className="profile-info">
-            <h2>{profile.name} {profile.level ? `(Lv.${profile.level})` : ''}</h2>
-            <div className="stats">
-              <span className="stat-pill wisdom">🧠 {profile.wisdomPoints} pts</span>
-              <span className="stat-pill resp">🛡️ {profile.responsibilityPoints} pts</span>
+      {profile && (() => {
+        const totalPoints = profile.wisdomPoints + profile.responsibilityPoints;
+        const progressPercent = totalPoints % 100;
+        return (
+          <div className="profile-bar">
+            <div className="profile-info" style={{ flex: 1, marginRight: '2rem' }}>
+              <h2>{profile.name} {profile.level ? `(Lv.${profile.level})` : ''}</h2>
+              <div className="level-bar-container" title={`${progressPercent}/100 to next level`}>
+                <div className="level-bar-fill" style={{ width: `${progressPercent}%` }}></div>
+              </div>
+              <div className="stats">
+                <span className="stat-pill wisdom">🧠 {profile.wisdomPoints} pts</span>
+                <span className="stat-pill resp">🛡️ {profile.responsibilityPoints} pts</span>
+              </div>
+            </div>
+            <div className="inventory" style={{ minWidth: '200px' }}>
+              <h3>Inventory</h3>
+              {profile.inventory.length === 0 ? <span className="empty">Empty</span> : profile.inventory.map((item, i) => <span key={i} className="inv-item">🎁 {item}</span>)}
             </div>
           </div>
-          <div className="inventory">
-            <h3>Inventory</h3>
-            {profile.inventory.length === 0 ? <span className="empty">Empty</span> : profile.inventory.map((item, i) => <span key={i} className="inv-item">🎁 {item}</span>)}
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {blindBox && (
         <div className="blind-box-modal">
