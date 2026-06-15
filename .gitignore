@@ -8,6 +8,11 @@ build/
 
 # ── Runtime ──
 .bun-cache/
+__pycache__/
+*.pyc
+family_hub.db
+.venv/
+.python-version
 
 # ── IDE ──
 .idea/

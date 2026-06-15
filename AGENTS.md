@@ -1,6 +1,6 @@
 # AGENTS.md — Family Hub
 
-> eCOS v5 家庭应用 · 家庭设备管理 + 生活服务 + 智能场景
+> eCOS v5 家庭应用 · React 前端 + FastMCP 家庭任务后端
 
 ## Quick Commands
 
@@ -10,35 +10,39 @@ bun install
 bun run dev
 bun run build
 bun run lint
+uv run python test_real_scenario.py
+uv run python -m unittest discover -s tests -q
 ```
 
 ## Architecture
 
-应用层项目，使用 TypeScript + React + Vite 构建：
+应用层项目，当前是双面结构：
 
 ```
-前端:  React + TypeScript + Vite
-状态:  React hooks + Context
-后端:  依赖 agora BOS URI 获取数据
+前端: React + TypeScript + Vite
+后端: FastMCP + SQLite
 ```
 
 ### 功能模块
 
 | 模块 | 职责 |
 |:-----|:------|
-| 设备管理 | 家庭设备的注册、状态、控制 |
-| 生活服务 | 日程、提醒、购物清单 |
-| 智能场景 | 自动化规则和场景触发 |
+| 成员档案 | 家庭成员等级、积分、库存 |
+| Quest 系统 | 创建、完成、积分结算 |
+| 智能任务 | 通过 LLM Gateway 生成个性化任务 |
+| 前端 UI | React 页面与展示层 |
 
 ## Dependencies
 
 - Bun runtime, TypeScript, React, Vite
+- uv, FastMCP, SQLite
 
 ## Testing
 
-当前使用 ESLint 进行静态检查。测试框架待集成。
+前端使用构建验证；后端使用最小场景脚本 + unittest。
 
 ```bash
-bun run lint
-bunx tsc --noEmit   # 类型检查
+bun run build
+uv run python test_real_scenario.py
+uv run python -m unittest discover -s tests -q
 ```
