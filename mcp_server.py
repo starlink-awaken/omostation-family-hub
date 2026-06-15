@@ -1,7 +1,11 @@
+import json
+import re
 import sqlite3
+import urllib.request
 from pathlib import Path
+from typing import Any, List
+
 from fastmcp import FastMCP
-from typing import List
 
 DB_PATH = Path(__file__).parent / "family_hub.db"
 
@@ -11,6 +15,48 @@ def _get_db():
     conn = sqlite3.connect(str(DB_PATH), timeout=2.0)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _extract_json_array(raw_content: str) -> list[dict[str, Any]]:
+    """Extract the first JSON array from an LLM response."""
+    text = (raw_content or "").strip()
+    if not text:
+        raise ValueError("empty gateway content")
+
+    fenced = re.search(r"```(?:json)?\s*(\[[\s\S]*?\])\s*```", text, re.IGNORECASE)
+    if fenced:
+        text = fenced.group(1).strip()
+
+    if text.startswith("["):
+        return json.loads(text)
+
+    start = text.find("[")
+    end = text.rfind("]")
+    if start == -1 or end == -1 or end <= start:
+        raise ValueError(f"no JSON array found in gateway content: {text[:120]}")
+    return json.loads(text[start : end + 1])
+
+
+def _normalize_generated_quest(raw: dict[str, Any], assignee: str) -> dict[str, Any]:
+    reward = raw.get("reward", 50)
+    try:
+        reward_int = int(reward)
+    except (TypeError, ValueError):
+        reward_int = 50
+    if reward_int <= 0:
+        reward_int = 50
+
+    quest_type = str(raw.get("type", "responsibility")).strip().lower() or "responsibility"
+    if quest_type not in {"wisdom", "responsibility", "learning", "household"}:
+        quest_type = "responsibility"
+
+    title = str(raw.get("title", "")).strip() or f"{assignee} 的智能任务"
+    return {
+        "title": title,
+        "type": quest_type,
+        "reward": reward_int,
+        "assignee": assignee,
+    }
 
 @mcp.tool()
 def get_health() -> dict:
@@ -86,6 +132,54 @@ def complete_quest(quest_id: int) -> dict:
                      (f"{assignee} completed quest: {quest_id} for {reward} points", "quest_completion"))
         conn.commit()
     return {"status": "success", "reward": reward, "assignee": assignee}
+
+@mcp.tool()
+def generate_smart_quests(assignee: str) -> dict:
+    """Use the L0 LLM Gateway (via HTTP) to dynamically generate personalized quests."""
+    prompt = (
+        f"You are a family quest generator. The assignee is '{assignee}'. "
+        f"Generate exactly 2 fun daily tasks (1 for wisdom, 1 for responsibility) "
+        f"for this family member. Format the output as JSON: "
+        f'[{{"title": "task title", "type": "wisdom/responsibility", "reward": 50}}]'
+        f" Do not output anything other than the JSON array."
+    )
+    
+    # Payload for llm-gateway HTTP API
+    data = json.dumps({"prompt": prompt}).encode("utf-8")
+    req = urllib.request.Request("http://localhost:9290/v1/generate", data=data, headers={"Content-Type": "application/json"})
+    
+    try:
+        with urllib.request.urlopen(req, timeout=10.0) as response:
+            resp_body = json.loads(response.read().decode("utf-8"))
+            
+        if "error" in resp_body:
+            return {"error": f"LLM Gateway returned error: {resp_body['error']}"}
+            
+        content = resp_body.get("content", "")
+        quests = [_normalize_generated_quest(item, assignee) for item in _extract_json_array(content)]
+        if not quests:
+            return {"error": "LLM Gateway returned an empty quest list"}
+        
+        # Save to DB
+        created_ids = []
+        with _get_db() as conn:
+            for q in quests:
+                cur = conn.execute(
+                    "INSERT INTO quests (title, type, reward, completed, assignee) VALUES (?, ?, ?, 0, ?)",
+                    (q["title"], q["type"], q["reward"], q["assignee"])
+                )
+                created_ids.append(cur.lastrowid)
+            conn.commit()
+            
+        return {
+            "status": "success",
+            "provider": resp_body.get("model", "unknown"),
+            "created_ids": created_ids,
+            "created_quests": quests,
+        }
+    except Exception as e:
+        return {"error": f"LLM generation failed: {str(e)}. Make sure llm-gateway is running on port 9290."}
+
 
 if __name__ == "__main__":
     mcp.run()
