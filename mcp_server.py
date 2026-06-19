@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import sqlite3
 import urllib.request
@@ -145,8 +146,9 @@ def generate_smart_quests(assignee: str) -> dict:
     )
     
     # Payload for llm-gateway HTTP API
+    llm_gateway_url = os.environ.get("LLM_GATEWAY_URL", "http://localhost:9290")
     data = json.dumps({"prompt": prompt}).encode("utf-8")
-    req = urllib.request.Request("http://localhost:9290/v1/generate", data=data, headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(f"{llm_gateway_url}/v1/generate", data=data, headers={"Content-Type": "application/json"})
     
     try:
         with urllib.request.urlopen(req, timeout=10.0) as response:
