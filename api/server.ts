@@ -90,8 +90,9 @@ app.post('/api/quests/:id/complete', (req, res) => {
   
   // MCP sync
   try {
-    const dbUrl = "postgresql://gbrain:Dsirl1Y0H6MTmo54ULeKZ21RJToe5RyB@127.0.0.1:5433/brain";
-    const gbrainCmd = `GBRAIN_DATABASE_URL=${dbUrl} bun run /Users/xiamingxing/Workspace/projects/gbrain/src/cli.ts put quest-${quest.id} --text "${quest.title} completed by ${quest.assignee}"`;
+    const dbUrl = process.env.GBRAIN_DATABASE_URL || "postgresql://gbrain:password@127.0.0.1:5433/brain";
+    const gbrainCli = process.env.GBRAIN_CLI_PATH || "bun run src/cli.ts";
+    const gbrainCmd = `GBRAIN_DATABASE_URL=${dbUrl} ${gbrainCli} put quest-${quest.id} --text "${quest.title} completed by ${quest.assignee}"`;
     exec(gbrainCmd, (err) => {
       if (err) console.error("gbrain persistence error:", err.message);
     });
