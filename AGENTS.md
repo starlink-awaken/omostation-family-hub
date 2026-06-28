@@ -1,57 +1,50 @@
 # AGENTS.md — Family Hub
 
-> eCOS v5 家庭应用 · React 前端 + FastMCP 家庭任务后端
+    > Scope: project-local developer guide for `family-hub`.
+    > Workspace rules live in [`../../AGENTS.md`](../../AGENTS.md); project metadata lives in [`../../docs/project-registry.yaml`](../../docs/project-registry.yaml).
 
-## Quick Commands
+    ## Role
 
-```bash
-cd projects/family-hub
-bun install
-bun run dev
-bun run build
-bun run lint
-uv run python test_real_scenario.py
-uv run python -m unittest discover -s tests -q
-```
+    - Layer: X
+    - Stack: Python / FastMCP
+    - Responsibility: 家庭数字枢纽与本地家庭任务/数据服务
 
-## Architecture
+    Do not copy volatile facts such as test counts, tool counts, service counts, ports, or current health into this file.
 
-应用层项目，当前是双面结构：
+    ## Before Editing
 
-```
-前端: React + TypeScript + Vite
-后端: FastMCP + SQLite
-```
+    1. Read this file and [`CLAUDE.md`](CLAUDE.md) when it exists.
+    2. Check `git status --short` inside this project and at the workspace root.
+    3. Read the specific source or tests you are about to change.
+    4. Prefer project-local commands and targeted tests.
 
-### 功能模块
+    ## Commands
 
-| 模块 | 职责 |
-|:-----|:------|
-| 成员档案 | 家庭成员等级、积分、库存 |
-| Quest 系统 | 创建、完成、积分结算 |
-| 智能任务 | 通过 LLM Gateway 生成个性化任务 |
-| 前端 UI | React 页面与展示层 |
+    ```bash
+    uv sync
+uv run pytest "tests/" -q
+    ```
 
-## Dependencies
+    ## Key Files
 
-- Bun runtime, TypeScript, React, Vite
-- uv, FastMCP, SQLite
+    - `src/`
+- `server.py`
+- `data/`
 
-## Testing
+    ## Gotchas
 
-前端使用构建验证；后端使用最小场景脚本 + unittest。
+    - `本地 SQLite/家庭数据不要提交。`
+- LLM Gateway 地址以环境变量和端口注册表为准。
 
-```bash
-bun run build
-uv run python test_real_scenario.py
-uv run python -m unittest discover -s tests -q
-```
+    ## Verification
 
-## Workspace-Wide Governance (2026-06-24)
+    - Documentation-only changes: run `uv run --with "pyyaml" python "../../bin/doc-ssot-lint.py" --json` from this project or from the workspace root.
+    - Code changes: run the narrowest relevant project test first, then broaden if shared contracts changed.
+    - Cross-layer behavior: verify the caller and the callee, not just the touched module.
 
-This project follows the workspace-level governance conventions documented in the root `AGENTS.md`:
+    ## SSOT Pointers
 
-- **Agent Mutation Protocol**: Any autonomous agent/cron/daemon that modifies workspace state must emit `agent_mutation_intent`, avoid direct file I/O to `.omo/`/`spaces/`, and commit immediately. See `.omo/standards/agent-mutation-protocol.md` for the full protocol.
-- **SSOT Guardian**: Run `python3 bin/ssot-guardian.py` from the workspace root before committing to detect task-count, current-wave, submodule-pointer, or direct-omo-io drift.
-- **direct-omo-io**: Scripts must route writes to `.omo/` through `omo CLI`, `projects/omo` core, or `projects/c2g` ingress — never via raw `open()/mkdir()/write_text()`.
-- **Submodule Governance**: Commit changes inside the submodule first, then bump the root-repo pointer; `git submodule status` with a `+` prefix indicates pending drift.
+    - Workspace architecture: [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md)
+    - Layer index: [`../../LAYER-INDEX.md`](../../LAYER-INDEX.md)
+    - Project metadata: [`../../docs/project-registry.yaml`](../../docs/project-registry.yaml)
+    - Runtime state: [`../../.omo/state/system.yaml`](../../.omo/state/system.yaml)
