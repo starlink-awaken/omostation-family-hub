@@ -87,14 +87,44 @@ def get_active_quests() -> List[dict]:
 
 @mcp.tool()
 def create_quest(title: str, type: str, reward: int, assignee: str) -> dict:
-    """Create a new quest for a family member."""
+    """Create a new quest for a family member.
+
+    When OMO_GOVERNANCE_ENABLED=1, also registers the quest as an OMO task
+    via ingress-task broker for governance visibility.
+    """
     with _get_db() as conn:
         cur = conn.execute(
             "INSERT INTO quests (title, type, reward, completed, assignee) VALUES (?, ?, ?, 0, ?)",
             (title, type, reward, assignee)
         )
+        quest_id = cur.lastrowid
         conn.commit()
-        return {"id": cur.lastrowid, "status": "created"}
+
+    # G2 fix: Route to OMO governance if enabled (non-blocking, best-effort)
+    if os.environ.get("OMO_GOVERNANCE_ENABLED"):
+        try:
+            import subprocess
+
+            workspace = Path(__file__).resolve().parents[2]
+            task_id = f"FAMILY-QUEST-{quest_id}"
+            subprocess.run(
+                [
+                    "python3", "-m", "omo.cli", "ingress-task",
+                    "--id", task_id,
+                    "--title", f"[家庭] {title}",
+                    "--assignee", assignee,
+                    "--priority", "P3",
+                    "--deliverable", f"family-hub quest #{quest_id}",
+                    "--workspace-root", str(workspace),
+                ],
+                capture_output=True,
+                timeout=5,
+                cwd=str(workspace / "projects" / "omo"),
+            )
+        except Exception:
+            pass  # Non-blocking: family-hub works standalone, OMO is optional
+
+    return {"id": quest_id, "status": "created"}
 
 @mcp.tool()
 def complete_quest(quest_id: int) -> dict:
