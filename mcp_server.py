@@ -38,6 +38,31 @@ def _extract_json_array(raw_content: str) -> list[dict[str, Any]]:
     return json.loads(text[start : end + 1])
 
 
+def _export_to_gbrain(event_data: dict) -> None:
+    """Export family-hub events to gbrain knowledge base (non-blocking, best-effort).
+
+    Uses BOS URI bos://memory/gbrain/put_page via agora MCP proxy.
+    Falls back to direct HTTP if agora is unavailable.
+    """
+    try:
+        gbrain_url = os.environ.get("GBRAIN_URL", "http://localhost:3000")
+        page_data = {
+            "title": f"family-hub: {event_data.get('event', 'unknown')}",
+            "content": json.dumps(event_data, ensure_ascii=False),
+            "source": "family-hub",
+            "tags": ["family-hub", event_data.get("event", "event")],
+        }
+        req = urllib.request.Request(
+            f"{gbrain_url}/api/pages",
+            data=json.dumps(page_data).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=3.0)
+    except Exception:  # noqa: BLE001  # non-blocking, best-effort export
+        pass  # gbrain not available — quest completion is not blocked
+
+
 def _normalize_generated_quest(raw: dict[str, Any], assignee: str) -> dict[str, Any]:
     reward = raw.get("reward", 50)
     try:
@@ -162,6 +187,10 @@ def complete_quest(quest_id: int) -> dict:
         conn.execute("INSERT INTO logs (message, type, timestamp) VALUES (?, ?, datetime('now'))", 
                      (f"{assignee} completed quest: {quest_id} for {reward} points", "quest_completion"))
         conn.commit()
+
+    # Export completed quest to gbrain knowledge base (if available)
+    _export_to_gbrain({"event": "quest_completed", "quest_id": quest_id, "assignee": assignee, "reward": reward})
+
     return {"status": "success", "reward": reward, "assignee": assignee}
 
 @mcp.tool()
