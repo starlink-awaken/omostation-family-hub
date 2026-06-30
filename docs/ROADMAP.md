@@ -3,7 +3,7 @@
 ## 1. 💡 创意与分析 (Ideation & PM Phase)
 
 **核心痛点**：传统家庭任务（做家务、写作业、阅读）缺乏正向激励，儿童缺乏主动参与的内驱力。家庭日程管理枯燥。
-**本质目的**：将 Family Hub 转化为一个“微型家庭 MMORPG”，赋予家庭成员身份（Profiles）、属性成长（Wisdom, Responsibility）、任务系统（Quests）和经济系统（Inventory/Rewards）。让 eCOS v5 OS 具备真实生活场景的交互触角。
+**本质目的**：将 Family Hub 转化为一个“微型家庭 MMORPG”，赋予家庭成员身份（Profiles）、属性成长（Wisdom, Responsibility）、任务系统（Quests）和经济系统（Inventory/Rewards）。让 eCOS v6 OS 具备真实生活场景的交互触角。
 
 **三个维度的创意发散：**
 1. **常规版（微习惯引擎）**：提供类似 Habitica 的基础面板，发布任务 -> 孩子点击完成 -> 父母审核发放金币/经验 -> 经验升级。
