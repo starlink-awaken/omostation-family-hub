@@ -15,3 +15,19 @@ dependencies = [
 [build-system]
 requires = ["uv_build>=0.11.19,<0.12.0"]
 build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+# P3 work: mcp_server.py 在根目录, tests/test_mcp_server.py `import mcp_server`
+# 找不到。pythonpath = ["."] 加根目录, 让 pytest import 到。
+# 治本 vs 治标: 这是"修复测试 setup" (test 本身写得对, 只是缺路径),
+# 改 src/ layout 是过度 (单文件 mcp_server 不需要 src/)。
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[dependency-groups]
+# P3 work: family-hub 缺 dev-deps, uv run pytest 找不到 pytest (fallback 到全局
+# ~/.local/bin/pytest), 导致 import fastmcp 失败。补 [dependency-groups] dev,
+# uv sync 装 pytest 到 venv, uv run pytest 用 venv pytest (而非全局)。
+dev = [
+    "pytest>=8.4.2",
+]
