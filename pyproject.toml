@@ -29,5 +29,5 @@ pythonpath = ["."]
 # ~/.local/bin/pytest), 导致 import fastmcp 失败。补 [dependency-groups] dev,
 # uv sync 装 pytest 到 venv, uv run pytest 用 venv pytest (而非全局)。
 dev = [
-    "pytest>=8.4.2",
+    "pytest>=9.0",
 ]
