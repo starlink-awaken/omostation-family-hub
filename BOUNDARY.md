@@ -32,3 +32,7 @@
 - 项目源码：`projects/family-hub/`
 - 入口定义：`projects/family-hub/pyproject.toml` 或 `package.json`
 - 测试：`cd projects/family-hub && bun run build && uv run python -m unittest discover -s tests -q`
+
+## 架构演进与项目边界索引
+
+参见工作区架构演进与项目边界：[`../../docs/ARCHITECTURE-EVOLUTION.md`](../../docs/ARCHITECTURE-EVOLUTION.md)
