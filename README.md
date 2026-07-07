@@ -43,3 +43,9 @@ uv run pytest "tests/" -q
 - [Changelog](CHANGELOG.md)
 - [License](LICENSE)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
+## Getting Help
+
+- [FAQ](docs/FAQ.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [API / Usage Reference](docs/API.md)
+- [Architecture Overview](docs/ARCHITECTURE.md)
