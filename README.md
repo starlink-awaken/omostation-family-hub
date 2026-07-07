@@ -13,7 +13,20 @@
 
     家庭数字枢纽与本地家庭任务/数据服务.
 
-    ## Quick Start
+    ## Installation
+
+```bash
+# Clone the workspace recursively
+git clone --recursive https://github.com/starlink-awaken/omostation.git
+cd omostation/projects/family-hub
+
+# Install dependencies with uv
+uv sync
+```
+
+Requires Python 3.13+ (see `pyproject.toml`).
+
+## Quick Start
 
     ```bash
     uv sync
@@ -43,6 +56,7 @@ uv run pytest "tests/" -q
 - [Changelog](CHANGELOG.md)
 - [License](LICENSE)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Contributors](CONTRIBUTORS.md)
 ## Getting Help
 
 - [FAQ](docs/FAQ.md)
