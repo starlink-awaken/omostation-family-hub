@@ -21,6 +21,14 @@ interface Profile {
 }
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const API_TOKEN = import.meta.env.VITE_FAMILY_HUB_API_TOKEN || '';
+
+function apiHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return {
+    ...extra,
+    ...(API_TOKEN ? { Authorization: `Bearer ${API_TOKEN}` } : {}),
+  };
+}
 
 function App() {
   const [role, setRole] = useState<'child' | 'parent'>('child');
@@ -34,7 +42,7 @@ function App() {
 
   const fetchDashboard = async (currentRole: string) => {
     try {
-      const res = await fetch(`${API_URL}/dashboard?role=${currentRole}`);
+      const res = await fetch(`${API_URL}/dashboard?role=${currentRole}`, { headers: apiHeaders() });
       const data = await res.json();
       setProfile(data.profile);
       setQuests(data.quests);
@@ -49,7 +57,7 @@ function App() {
   const fetchReport = async () => {
     setIsReportLoading(true);
     try {
-      const res = await fetch(`${API_URL}/report?role=${role}`);
+      const res = await fetch(`${API_URL}/report?role=${role}`, { headers: apiHeaders() });
       const data = await res.json();
       if (data.success) {
         setReport(data.report);
@@ -63,7 +71,10 @@ function App() {
   };
 
   useEffect(() => {
-    fetchDashboard(role);
+    const schedule = window.setTimeout(() => {
+      void fetchDashboard(role);
+    }, 0);
+    return () => window.clearTimeout(schedule);
   }, [role]);
 
   const toggleTask = async (id: number, currentCompleted: boolean) => {
@@ -71,7 +82,8 @@ function App() {
 
     try {
       const res = await fetch(`${API_URL}/quests/${id}/complete`, {
-        method: 'POST'
+        method: 'POST',
+        headers: apiHeaders(),
       });
       const data = await res.json();
       
@@ -102,7 +114,7 @@ function App() {
     try {
       const res = await fetch(`${API_URL}/quests`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ title, type, reward, assignee })
       });
       const data = await res.json();
