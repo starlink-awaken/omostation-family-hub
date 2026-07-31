@@ -13,7 +13,7 @@
 
 ## Becoming a Maintainer
 
-Consistent, high-quality contributors may be invited to become maintainers. The process is documented in the workspace [`GOVERNANCE.md`](GOVERNANCE.md).
+Consistent, high-quality contributors may be invited to become maintainers. The process is documented in the [workspace governance entry point](https://github.com/starlink-awaken/omostation/blob/main/GOVERNANCE.md).
 
 ## Emeritus Maintainers
 
