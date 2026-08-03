@@ -101,7 +101,9 @@ class GenerateSmartQuestsTests(unittest.TestCase):
         self.assertEqual(result["created_quests"][0]["reward"], 40)
 
         with mcp_server._get_db() as conn:
-            rows = conn.execute("SELECT title, type, reward, assignee FROM quests ORDER BY id").fetchall()
+            rows = conn.execute(
+                "SELECT title, type, reward, assignee FROM quests ORDER BY id"
+            ).fetchall()
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0]["assignee"], "kid")
         self.assertEqual(rows[1]["type"], "household")

@@ -6,22 +6,20 @@ gbrain HTTP export, and LLM gateway generation.
 
 from __future__ import annotations
 
+import http.server
 import json
 import os
 import sqlite3
 import threading
-import http.server
-from unittest.mock import patch, MagicMock
-from pathlib import Path
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 import mcp_server as qs
-
+import pytest
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def real_db(tmp_path, monkeypatch):
@@ -115,6 +113,7 @@ def mock_http_server():
 # Full quest lifecycle
 # ---------------------------------------------------------------------------
 
+
 class TestQuestLifecycle:
     """Create → activate → complete → verify consequences."""
 
@@ -196,6 +195,7 @@ class TestQuestLifecycle:
 # OMO governance subprocess integration
 # ---------------------------------------------------------------------------
 
+
 class TestOmoGovernanceIntegration:
     def test_create_quest_triggers_omo_subprocess(self, family_hub, monkeypatch):
         """When OMO_GOVERNANCE_ENABLED=1, quest creation spawns subprocess."""
@@ -223,6 +223,7 @@ class TestOmoGovernanceIntegration:
 # ---------------------------------------------------------------------------
 # gbrain HTTP export integration
 # ---------------------------------------------------------------------------
+
 
 class TestGbrainExportIntegration:
     def test_export_posts_to_gbrain(self, family_hub, mock_http_server):
@@ -264,31 +265,41 @@ class TestGbrainExportIntegration:
 # LLM gateway smart quest generation
 # ---------------------------------------------------------------------------
 
+
 class TestSmartQuestGeneration:
-    def test_generate_creates_quests_from_llm_response(self, family_hub, mock_http_server):
+    def test_generate_creates_quests_from_llm_response(
+        self, family_hub, mock_http_server
+    ):
         """Smart quest generation parses LLM response and creates quests."""
         llm_url, received = mock_http_server
         os.environ["FAMILY_HUB_LLM_URL"] = llm_url + "/generate"
 
         # The mock server returns {"status": "ok"} for any request
         # We need to mock the actual LLM response content
-        llm_response = json.dumps({
-            "content": '[{"title": "AI学习", "type": "wisdom", "reward": 75}, {"title": "打扫房间", "type": "household", "reward": 30}]',
-            "model": "test-model",
-        })
+        llm_response = json.dumps(
+            {
+                "content": '[{"title": "AI学习", "type": "wisdom", "reward": 75}, {"title": "打扫房间", "type": "household", "reward": 30}]',
+                "model": "test-model",
+            }
+        )
 
         import urllib.request
+
         original_urlopen = urllib.request.urlopen
 
         class MockResponse:
             def read(self):
                 return llm_response.encode()
+
             def __enter__(self):
                 return self
+
             def __exit__(self, *args):
                 pass
 
-        with patch("urllib.request.urlopen", side_effect=lambda req, **kw: MockResponse()):
+        with patch(
+            "urllib.request.urlopen", side_effect=lambda req, **kw: MockResponse()
+        ):
             result = qs.generate_smart_quests("parent")
 
         assert result["status"] == "success"
@@ -300,17 +311,20 @@ class TestSmartQuestGeneration:
 
     def test_generate_handles_invalid_llm_json(self, family_hub):
         """Invalid LLM response returns error without crashing."""
-        import urllib.request
 
         class MockResponse:
             def read(self):
                 return b'{"error": "timeout"}'
+
             def __enter__(self):
                 return self
+
             def __exit__(self, *args):
                 pass
 
-        with patch("urllib.request.urlopen", side_effect=lambda req, **kw: MockResponse()):
+        with patch(
+            "urllib.request.urlopen", side_effect=lambda req, **kw: MockResponse()
+        ):
             result = qs.generate_smart_quests("parent")
 
         assert "error" in result
@@ -319,6 +333,7 @@ class TestSmartQuestGeneration:
 # ---------------------------------------------------------------------------
 # FastMCP tool integration (end-to-end via MCP client)
 # ---------------------------------------------------------------------------
+
 
 class TestMCPToolIntegration:
     def test_get_health_returns_ok(self, family_hub):
