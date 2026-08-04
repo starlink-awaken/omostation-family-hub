@@ -271,7 +271,7 @@ class TestSmartQuestGeneration:
         self, family_hub, mock_http_server
     ):
         """Smart quest generation parses LLM response and creates quests."""
-        llm_url, received = mock_http_server
+        llm_url, _received = mock_http_server
         os.environ["FAMILY_HUB_LLM_URL"] = llm_url + "/generate"
 
         # The mock server returns {"status": "ok"} for any request
@@ -282,10 +282,6 @@ class TestSmartQuestGeneration:
                 "model": "test-model",
             }
         )
-
-        import urllib.request
-
-        original_urlopen = urllib.request.urlopen
 
         class MockResponse:
             def read(self):

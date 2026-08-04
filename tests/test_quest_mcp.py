@@ -118,7 +118,7 @@ class TestCreateQuest:
 
     def test_create_quest_with_omo_governance(self, tmp_db, monkeypatch):
         monkeypatch.setenv("OMO_GOVERNANCE_ENABLED", "1")
-        with patch("subprocess.run") as mock_run:
+        with patch("subprocess.run") as _mock_run:
             result = qs.create_quest("Governed Quest", "wisdom", 50, "parent")
             assert result["status"] == "created"
             # OMO governance is non-blocking; subprocess may or may not be called
