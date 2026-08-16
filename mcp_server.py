@@ -4,7 +4,7 @@ import re
 import sqlite3
 import urllib.request
 from pathlib import Path
-from typing import Any, List
+from typing import Any
 
 from fastmcp import FastMCP
 
@@ -59,7 +59,7 @@ def _export_to_gbrain(event_data: dict) -> None:
             method="POST",
         )
         urllib.request.urlopen(req, timeout=3.0)
-    except Exception:  # noqa: BLE001  # non-blocking, best-effort export
+    except Exception:  # noqa: BLE001, S110  # non-blocking, best-effort export
         pass  # gbrain not available — quest completion is not blocked
 
 
@@ -93,18 +93,18 @@ def get_health() -> dict:
         with _get_db() as conn:
             conn.execute("SELECT 1").fetchone()
         return {"status": "ok"}
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — return error to client
         return {"error": str(e)}
 
 @mcp.tool()
-def get_profiles() -> List[dict]:
+def get_profiles() -> list[dict]:
     """Get all family member profiles."""
     with _get_db() as conn:
         profiles = conn.execute("SELECT role, name, level, wisdomPoints, responsibilityPoints, inventory FROM profiles").fetchall()
     return [dict(p) for p in profiles]
 
 @mcp.tool()
-def get_active_quests() -> List[dict]:
+def get_active_quests() -> list[dict]:
     """Get all active (uncompleted) quests."""
     with _get_db() as conn:
         quests = conn.execute("SELECT id, title, type, reward, completed, assignee FROM quests WHERE completed = 0").fetchall()
@@ -143,10 +143,11 @@ def create_quest(title: str, type: str, reward: int, assignee: str) -> dict:
                     "--workspace-root", str(workspace),
                 ],
                 capture_output=True,
+                check=False,  # best-effort: OMO optional, non-blocking
                 timeout=5,
                 cwd=str(workspace / "projects" / "omo"),
             )
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 — OMO optional
             pass  # Non-blocking: family-hub works standalone, OMO is optional
 
     return {"id": quest_id, "status": "created"}
@@ -238,8 +239,8 @@ def generate_smart_quests(assignee: str) -> dict:
             "created_ids": created_ids,
             "created_quests": quests,
         }
-    except Exception as e:
-        return {"error": f"LLM generation failed: {str(e)}. Make sure llm-gateway is running on port 9290."}
+    except Exception as e:  # noqa: BLE001 — surface LLM error to client
+        return {"error": f"LLM generation failed: {e!s}. Make sure llm-gateway is running on port 9290."}
 
 
 if __name__ == "__main__":
