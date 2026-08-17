@@ -12,6 +12,7 @@ DB_PATH = Path(__file__).parent / "family_hub.db"
 
 mcp = FastMCP("family-hub")
 
+
 def _get_db():
     conn = sqlite3.connect(str(DB_PATH), timeout=2.0)
     conn.row_factory = sqlite3.Row
@@ -59,7 +60,7 @@ def _export_to_gbrain(event_data: dict) -> None:
             method="POST",
         )
         urllib.request.urlopen(req, timeout=3.0)
-    except Exception:  # noqa: BLE001, S110  # non-blocking, best-effort export
+    except Exception:  # non-blocking, best-effort export
         pass  # gbrain not available — quest completion is not blocked
 
 
@@ -84,6 +85,7 @@ def _normalize_generated_quest(raw: dict[str, Any], assignee: str) -> dict[str, 
         "assignee": assignee,
     }
 
+
 @mcp.tool()
 def get_health() -> dict:
     """Check health of the family hub database."""
@@ -93,22 +95,29 @@ def get_health() -> dict:
         with _get_db() as conn:
             conn.execute("SELECT 1").fetchone()
         return {"status": "ok"}
-    except Exception as e:  # noqa: BLE001 — return error to client
+    except Exception as e:
         return {"error": str(e)}
+
 
 @mcp.tool()
 def get_profiles() -> list[dict]:
     """Get all family member profiles."""
     with _get_db() as conn:
-        profiles = conn.execute("SELECT role, name, level, wisdomPoints, responsibilityPoints, inventory FROM profiles").fetchall()
+        profiles = conn.execute(
+            "SELECT role, name, level, wisdomPoints, responsibilityPoints, inventory FROM profiles"
+        ).fetchall()
     return [dict(p) for p in profiles]
+
 
 @mcp.tool()
 def get_active_quests() -> list[dict]:
     """Get all active (uncompleted) quests."""
     with _get_db() as conn:
-        quests = conn.execute("SELECT id, title, type, reward, completed, assignee FROM quests WHERE completed = 0").fetchall()
+        quests = conn.execute(
+            "SELECT id, title, type, reward, completed, assignee FROM quests WHERE completed = 0"
+        ).fetchall()
     return [dict(q) for q in quests]
+
 
 @mcp.tool()
 def create_quest(title: str, type: str, reward: int, assignee: str) -> dict:
@@ -120,7 +129,7 @@ def create_quest(title: str, type: str, reward: int, assignee: str) -> dict:
     with _get_db() as conn:
         cur = conn.execute(
             "INSERT INTO quests (title, type, reward, completed, assignee) VALUES (?, ?, ?, 0, ?)",
-            (title, type, reward, assignee)
+            (title, type, reward, assignee),
         )
         quest_id = cur.lastrowid
         conn.commit()
@@ -134,65 +143,87 @@ def create_quest(title: str, type: str, reward: int, assignee: str) -> dict:
             task_id = f"FAMILY-QUEST-{quest_id}"
             subprocess.run(
                 [
-                    "python3", "-m", "omo.cli", "ingress-task",
-                    "--id", task_id,
-                    "--title", f"[家庭] {title}",
-                    "--assignee", assignee,
-                    "--priority", "P3",
-                    "--deliverable", f"family-hub quest #{quest_id}",
-                    "--workspace-root", str(workspace),
+                    "python3",
+                    "-m",
+                    "omo.cli",
+                    "ingress-task",
+                    "--id",
+                    task_id,
+                    "--title",
+                    f"[家庭] {title}",
+                    "--assignee",
+                    assignee,
+                    "--priority",
+                    "P3",
+                    "--deliverable",
+                    f"family-hub quest #{quest_id}",
+                    "--workspace-root",
+                    str(workspace),
                 ],
                 capture_output=True,
                 check=False,  # best-effort: OMO optional, non-blocking
                 timeout=5,
                 cwd=str(workspace / "projects" / "omo"),
             )
-        except Exception:  # noqa: BLE001, S110 — OMO optional
+        except Exception:
             pass  # Non-blocking: family-hub works standalone, OMO is optional
 
     return {"id": quest_id, "status": "created"}
+
 
 @mcp.tool()
 def complete_quest(quest_id: int) -> dict:
     """Mark a quest as completed and award the assignee."""
     with _get_db() as conn:
         # Check if quest exists and is active
-        quest = conn.execute("SELECT reward, assignee, type FROM quests WHERE id = ? AND completed = 0", (quest_id,)).fetchone()
+        quest = conn.execute(
+            "SELECT reward, assignee, type FROM quests WHERE id = ? AND completed = 0", (quest_id,)
+        ).fetchone()
         if not quest:
             return {"error": "Quest not found or already completed"}
-            
+
         reward = quest["reward"]
         assignee = quest["assignee"]
         q_type = quest["type"]
-        
+
         # Mark as completed
         conn.execute("UPDATE quests SET completed = 1 WHERE id = ?", (quest_id,))
-        
+
         # Update profile points based on type
         if q_type in ("household", "responsibility"):
-            conn.execute("UPDATE profiles SET responsibilityPoints = responsibilityPoints + ? WHERE role = ?", (reward, assignee))
+            conn.execute(
+                "UPDATE profiles SET responsibilityPoints = responsibilityPoints + ? WHERE role = ?", (reward, assignee)
+            )
         elif q_type in ("learning", "wisdom"):
             conn.execute("UPDATE profiles SET wisdomPoints = wisdomPoints + ? WHERE role = ?", (reward, assignee))
         else:
             # Fallback
-            conn.execute("UPDATE profiles SET responsibilityPoints = responsibilityPoints + ? WHERE role = ?", (reward, assignee))
-            
+            conn.execute(
+                "UPDATE profiles SET responsibilityPoints = responsibilityPoints + ? WHERE role = ?", (reward, assignee)
+            )
+
         # Update level logic (simple: every 100 total points = 1 level)
-        conn.execute("""
-            UPDATE profiles 
-            SET level = 1 + (wisdomPoints + responsibilityPoints) / 100 
+        conn.execute(
+            """
+            UPDATE profiles
+            SET level = 1 + (wisdomPoints + responsibilityPoints) / 100
             WHERE role = ?
-        """, (assignee,))
-            
+        """,
+            (assignee,),
+        )
+
         # Log action
-        conn.execute("INSERT INTO logs (message, type, timestamp) VALUES (?, ?, datetime('now'))", 
-                     (f"{assignee} completed quest: {quest_id} for {reward} points", "quest_completion"))
+        conn.execute(
+            "INSERT INTO logs (message, type, timestamp) VALUES (?, ?, datetime('now'))",
+            (f"{assignee} completed quest: {quest_id} for {reward} points", "quest_completion"),
+        )
         conn.commit()
 
     # Export completed quest to gbrain knowledge base (if available)
     _export_to_gbrain({"event": "quest_completed", "quest_id": quest_id, "assignee": assignee, "reward": reward})
 
     return {"status": "success", "reward": reward, "assignee": assignee}
+
 
 @mcp.tool()
 def generate_smart_quests(assignee: str) -> dict:
@@ -204,42 +235,44 @@ def generate_smart_quests(assignee: str) -> dict:
         f'[{{"title": "task title", "type": "wisdom/responsibility", "reward": 50}}]'
         f" Do not output anything other than the JSON array."
     )
-    
+
     # Payload for llm-gateway HTTP API
     llm_gateway_url = os.environ.get("LLM_GATEWAY_URL", "http://localhost:9290")
     data = json.dumps({"prompt": prompt}).encode("utf-8")
-    req = urllib.request.Request(f"{llm_gateway_url}/v1/generate", data=data, headers={"Content-Type": "application/json"})
-    
+    req = urllib.request.Request(
+        f"{llm_gateway_url}/v1/generate", data=data, headers={"Content-Type": "application/json"}
+    )
+
     try:
         with urllib.request.urlopen(req, timeout=10.0) as response:
             resp_body = json.loads(response.read().decode("utf-8"))
-            
+
         if "error" in resp_body:
             return {"error": f"LLM Gateway returned error: {resp_body['error']}"}
-            
+
         content = resp_body.get("content", "")
         quests = [_normalize_generated_quest(item, assignee) for item in _extract_json_array(content)]
         if not quests:
             return {"error": "LLM Gateway returned an empty quest list"}
-        
+
         # Save to DB
         created_ids = []
         with _get_db() as conn:
             for q in quests:
                 cur = conn.execute(
                     "INSERT INTO quests (title, type, reward, completed, assignee) VALUES (?, ?, ?, 0, ?)",
-                    (q["title"], q["type"], q["reward"], q["assignee"])
+                    (q["title"], q["type"], q["reward"], q["assignee"]),
                 )
                 created_ids.append(cur.lastrowid)
             conn.commit()
-            
+
         return {
             "status": "success",
             "provider": resp_body.get("model", "unknown"),
             "created_ids": created_ids,
             "created_quests": quests,
         }
-    except Exception as e:  # noqa: BLE001 — surface LLM error to client
+    except Exception as e:
         return {"error": f"LLM generation failed: {e!s}. Make sure llm-gateway is running on port 9290."}
 
 

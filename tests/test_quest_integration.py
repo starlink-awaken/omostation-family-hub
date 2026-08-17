@@ -13,8 +13,9 @@ import sqlite3
 import threading
 from unittest.mock import MagicMock, patch
 
-import mcp_server as qs
 import pytest
+
+import mcp_server as qs
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -267,9 +268,7 @@ class TestGbrainExportIntegration:
 
 
 class TestSmartQuestGeneration:
-    def test_generate_creates_quests_from_llm_response(
-        self, family_hub, mock_http_server
-    ):
+    def test_generate_creates_quests_from_llm_response(self, family_hub, mock_http_server):
         """Smart quest generation parses LLM response and creates quests."""
         llm_url, _received = mock_http_server
         os.environ["FAMILY_HUB_LLM_URL"] = llm_url + "/generate"
@@ -293,9 +292,7 @@ class TestSmartQuestGeneration:
             def __exit__(self, *args):
                 pass
 
-        with patch(
-            "urllib.request.urlopen", side_effect=lambda req, **kw: MockResponse()
-        ):
+        with patch("urllib.request.urlopen", side_effect=lambda req, **kw: MockResponse()):
             result = qs.generate_smart_quests("parent")
 
         assert result["status"] == "success"
@@ -318,9 +315,7 @@ class TestSmartQuestGeneration:
             def __exit__(self, *args):
                 pass
 
-        with patch(
-            "urllib.request.urlopen", side_effect=lambda req, **kw: MockResponse()
-        ):
+        with patch("urllib.request.urlopen", side_effect=lambda req, **kw: MockResponse()):
             result = qs.generate_smart_quests("parent")
 
         assert "error" in result
