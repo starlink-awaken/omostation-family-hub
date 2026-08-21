@@ -36,3 +36,6 @@ coverage/
 .nyc_output/
 .omc/
 *.tmp
+
+# Auto-generated bump workflow
+.github/workflows/bump-main-pr.yml
