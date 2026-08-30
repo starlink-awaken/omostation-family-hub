@@ -78,6 +78,22 @@ def test_plan_rejects_symlink_without_following_it(tmp_path: Path) -> None:
         plan_import(source, tmp_path / "target", replacements={})
 
 
+def test_plan_records_but_does_not_follow_symlink_in_forbidden_cache(tmp_path: Path) -> None:
+    source = _minimal_source(tmp_path)
+    outside = tmp_path / "outside-secret"
+    _write(outside, "must not be read\n")
+    link = source / "node_modules" / ".bin" / "tool"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(outside)
+
+    plan = plan_import(source, tmp_path / "target", replacements={})
+
+    assert plan.selected_count == 2
+    assert plan.full_source_count == 3
+    assert plan.excluded_counts == {"runtime_or_private": 1}
+    assert str(outside) not in json.dumps(plan.to_public_dict())
+
+
 def test_plan_separates_private_text_for_deterministic_substitution(tmp_path: Path) -> None:
     source = _minimal_source(tmp_path)
     _write(source / "src" / "member.ts", 'export const member = "Private Person";\n')

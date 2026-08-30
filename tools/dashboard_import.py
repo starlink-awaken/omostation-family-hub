@@ -77,6 +77,18 @@ class FileRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class SourceNodeRecord:
+    relative_path: str
+    node_type: str
+    mode: int
+    size: int
+    sha256: str
+
+    def to_public_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
 class SanitizedRecord:
     relative_path: str
     mode: int
@@ -175,6 +187,39 @@ def _record(path: Path, relative_path: str) -> FileRecord:
     )
 
 
+def _source_node_record(path: Path, relative_path: str) -> SourceNodeRecord:
+    metadata = path.lstat()
+    mode = stat.S_IMODE(metadata.st_mode)
+    if stat.S_ISREG(metadata.st_mode):
+        return SourceNodeRecord(relative_path, "regular", mode, metadata.st_size, _digest_file(path))
+    if stat.S_ISLNK(metadata.st_mode):
+        encoded_target = os.readlink(path).encode("utf-8", errors="surrogateescape")
+        return SourceNodeRecord(relative_path, "symlink", mode, len(encoded_target), _digest_bytes(encoded_target))
+    return SourceNodeRecord(relative_path, "other", mode, metadata.st_size, _digest_bytes(b""))
+
+
+def _iter_source_nodes(root: Path) -> tuple[SourceNodeRecord, ...]:
+    if not root.is_dir() or root.is_symlink():
+        raise ImportClosedError(f"source is not a safe directory: {root}")
+    records: list[SourceNodeRecord] = []
+    for current, dirnames, filenames in os.walk(root, followlinks=False):
+        current_path = Path(current)
+        retained_dirs: list[str] = []
+        for dirname in sorted(dirnames):
+            directory = current_path / dirname
+            relative = directory.relative_to(root).as_posix()
+            if directory.is_symlink():
+                records.append(_source_node_record(directory, relative))
+            else:
+                retained_dirs.append(dirname)
+        dirnames[:] = retained_dirs
+        for filename in sorted(filenames):
+            file_path = current_path / filename
+            relative = file_path.relative_to(root).as_posix()
+            records.append(_source_node_record(file_path, relative))
+    return tuple(sorted(records, key=lambda record: record.relative_path))
+
+
 def _iter_regular_files(root: Path) -> tuple[FileRecord, ...]:
     if not root.is_dir() or root.is_symlink():
         raise ImportClosedError(f"source is not a safe directory: {root}")
@@ -271,7 +316,7 @@ def plan_import(
     required_private_tokens: tuple[str, ...] | None = None,
 ) -> ImportPlan:
     del target  # Target absence/collision is checked by apply; planning is read-only.
-    full_records = _iter_regular_files(source)
+    full_records = _iter_source_nodes(source)
     exact_files: list[FileRecord] = []
     sanitized_files: list[SanitizedRecord] = []
     excluded_counts: dict[str, int] = {}
@@ -283,9 +328,12 @@ def plan_import(
         if category is not None:
             excluded_counts[category] = excluded_counts.get(category, 0) + 1
             continue
+        if record.node_type != "regular":
+            raise ImportClosedError(f"unsafe node: {record.relative_path}")
         if not _is_allowed(relative):
             raise ImportClosedError(f"unknown root: {record.relative_path}")
         raw = (source / record.relative_path).read_bytes()
+        file_record = FileRecord(record.relative_path, record.mode, record.size, record.sha256)
         matched_tokens = tuple(token for token in required_tokens if token and token.encode("utf-8") in raw)
         unmapped = tuple(token for token in matched_tokens if token not in replacements)
         if unmapped:
@@ -303,7 +351,7 @@ def plan_import(
                 )
             )
         else:
-            exact_files.append(record)
+            exact_files.append(file_record)
 
     public_selected = [record.to_public_dict() for record in exact_files]
     public_selected.extend(record.to_public_dict() for record in sanitized_files)
@@ -324,7 +372,7 @@ def plan_import(
 
 
 def _assert_source_unchanged(plan: ImportPlan, source: Path) -> None:
-    current = _iter_regular_files(source)
+    current = _iter_source_nodes(source)
     fingerprint = _canonical_fingerprint(record.to_public_dict() for record in current)
     if (
         len(current) != plan.full_source_count
