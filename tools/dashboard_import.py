@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shutil
 import stat
+import sys
 import uuid
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
@@ -16,6 +18,7 @@ from typing import Any
 import yaml
 
 SCHEMA = "family-dashboard-import-plan/v1"
+TARGET_SCHEMA = "family-dashboard-import-target/v1"
 SANITIZE_TRANSFORM = "private-token-substitution/v1"
 
 ALLOWED_ROOTS = frozenset({"src", "scripts", "public", "e2e", "_deploy"})
@@ -434,3 +437,153 @@ def write_receipt(plan: ImportPlan, output: Path) -> None:
     payload = json.dumps(plan.to_public_dict(), ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     with output.open("x", encoding="utf-8") as handle:
         handle.write(payload)
+
+
+def _read_plan(path: Path) -> ImportPlan:
+    if not path.is_file() or path.is_symlink():
+        raise ImportClosedError("source receipt must be a regular file")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("schema") != SCHEMA:
+        raise ImportClosedError("source receipt schema mismatch")
+    try:
+        return ImportPlan(
+            schema=payload["schema"],
+            files=tuple(FileRecord(**record) for record in payload["files"]),
+            sanitized_files=tuple(SanitizedRecord(**record) for record in payload["sanitized_files"]),
+            selected_count=int(payload["selected_count"]),
+            selected_bytes=int(payload["selected_bytes"]),
+            selected_fingerprint=str(payload["selected_fingerprint"]),
+            full_source_count=int(payload["full_source_count"]),
+            full_source_bytes=int(payload["full_source_bytes"]),
+            full_source_fingerprint=str(payload["full_source_fingerprint"]),
+            excluded_counts={str(key): int(value) for key, value in payload["excluded_counts"].items()},
+            redaction_map_digest=str(payload["redaction_map_digest"]),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ImportClosedError("source receipt is malformed") from exc
+
+
+def _write_private_mapping(replacements: dict[str, str], output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    encoded = (json.dumps(replacements, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    descriptor = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except Exception:
+        output.unlink(missing_ok=True)
+        raise
+
+
+def _read_private_mapping(path: Path) -> dict[str, str]:
+    if not path.is_file() or path.is_symlink():
+        raise ImportClosedError("redaction map must be a regular file")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or not payload:
+        raise ImportClosedError("redaction map must be a non-empty object")
+    replacements: dict[str, str] = {}
+    for token, replacement in payload.items():
+        if not isinstance(token, str) or not token or not isinstance(replacement, str) or not replacement:
+            raise ImportClosedError("redaction map entries must be non-empty strings")
+        replacements[token] = replacement
+    return replacements
+
+
+def _write_target_receipt(plan: ImportPlan, output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema": TARGET_SCHEMA,
+        "status": "completed",
+        "plan": plan.to_public_dict(),
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    with output.open("x", encoding="utf-8") as handle:
+        handle.write(encoded)
+
+
+def _verify_target_receipt(plan: ImportPlan, path: Path) -> None:
+    if not path.is_file() or path.is_symlink():
+        raise ImportClosedError("target receipt must be a regular file")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload != {"schema": TARGET_SCHEMA, "status": "completed", "plan": plan.to_public_dict()}:
+        raise ImportClosedError("target receipt mismatch")
+
+
+def _public_status(status: str, plan: ImportPlan) -> dict[str, Any]:
+    return {
+        "status": status,
+        "selected_count": plan.selected_count,
+        "selected_fingerprint": plan.selected_fingerprint,
+        "full_source_fingerprint": plan.full_source_fingerprint,
+    }
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    derive = subparsers.add_parser("derive-redaction-map")
+    derive.add_argument("--source", type=Path, required=True)
+    derive.add_argument("--output", type=Path, required=True)
+    derive.add_argument("--json", action="store_true")
+
+    for command in ("plan", "apply", "verify"):
+        subparser = subparsers.add_parser(command)
+        subparser.add_argument("--source", type=Path, required=True)
+        subparser.add_argument("--target", type=Path, required=True)
+        subparser.add_argument("--redaction-map", type=Path, required=True)
+        subparser.add_argument("--source-receipt", type=Path, required=True)
+        subparser.add_argument("--json", action="store_true")
+        if command in {"apply", "verify"}:
+            subparser.add_argument("--target-receipt", type=Path, required=True)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    if args.command == "derive-redaction-map":
+        result = derive_redaction_map(args.source)
+        _write_private_mapping(result.replacements, args.output)
+        print(json.dumps(result.public_summary, sort_keys=True))
+        return 0
+
+    replacements = _read_private_mapping(args.redaction_map)
+    if args.command == "plan":
+        plan = plan_import(args.source, args.target, replacements=replacements)
+        write_receipt(plan, args.source_receipt)
+        print(json.dumps(_public_status("planned", plan), sort_keys=True))
+        return 0
+
+    plan = _read_plan(args.source_receipt)
+    fresh = plan_import(args.source, args.target, replacements=replacements)
+    if fresh != plan:
+        raise ImportClosedError("source plan drift")
+    if args.command == "apply":
+        apply_import(plan, args.source, args.target, replacements=replacements)
+        _write_target_receipt(plan, args.target_receipt)
+        print(json.dumps(_public_status("completed", plan), sort_keys=True))
+        return 0
+    _verify_target_receipt(plan, args.target_receipt)
+    result = verify_import(plan, args.source, args.target, replacements=replacements)
+    print(
+        json.dumps(
+            {
+                "status": "verified",
+                "selected_count": result.selected_count,
+                "selected_fingerprint": result.selected_fingerprint,
+                "full_source_fingerprint": result.full_source_fingerprint,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except ImportClosedError as exc:
+        print(json.dumps({"status": "error", "error": str(exc)}, sort_keys=True), file=sys.stderr)
+        raise SystemExit(1) from exc
