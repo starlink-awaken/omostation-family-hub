@@ -57,3 +57,12 @@ test("rejects state traversal", () => {
   expect(() => statePath("..", "escape.json")).toThrow("state path escapes");
 });
 
+test("rejects state symlink escape", () => {
+  const documents = mkdtempSync(path.join(os.tmpdir(), "family-documents-"));
+  const state = mkdtempSync(path.join(os.tmpdir(), "family-state-"));
+  symlinkSync(os.tmpdir(), path.join(state, "cache"));
+  vi.stubEnv("FAMILY_DOCUMENTS_ROOT", documents);
+  vi.stubEnv("FAMILY_DASHBOARD_STATE_ROOT", state);
+
+  expect(() => statePath("cache", "outside.txt")).toThrow("state path crosses a symlink");
+});

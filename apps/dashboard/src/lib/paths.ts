@@ -55,6 +55,8 @@ export function statePath(...parts: string[]): string {
   if (candidate !== root && !candidate.startsWith(`${root}${path.sep}`)) {
     throw new Error("state path escapes FAMILY_DASHBOARD_STATE_ROOT");
   }
+  if (hasSymlinkComponent(root, candidate)) {
+    throw new Error("state path crosses a symlink");
+  }
   return candidate;
 }
-
