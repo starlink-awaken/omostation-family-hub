@@ -1,14 +1,14 @@
-FROM oven/bun:1.2 AS builder
+FROM oven/bun:1.3.14 AS builder
 WORKDIR /app
 
 COPY package.json bun.lock ./
-RUN bun install
+RUN bun install --frozen-lockfile
 
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN bun run build
 
-FROM oven/bun:1.2 AS runner
+FROM oven/bun:1.3.14 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -26,7 +26,6 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/src/lib ./src/lib
 COPY --from=builder /app/src/types ./src/types
-COPY --from=builder /app/data-manifest ./data-manifest
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 
 COPY _deploy/entrypoint.sh /entrypoint.sh

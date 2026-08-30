@@ -6,7 +6,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - FAMILY_SSOT_ROOT=/ssot
+      - FAMILY_DOCUMENTS_ROOT=/documents
+      - FAMILY_DASHBOARD_STATE_ROOT=/state
       - FAMILY_DASHBOARD_PASSWORD=${FAMILY_DASHBOARD_PASSWORD}
       - FAMILY_DASHBOARD_COOKIE_TTL_DAYS=7
       - FAMILY_AI_GATEWAY=http://ai-gateway:4000
@@ -14,8 +15,8 @@ services:
       - FAMILY_CRON_TOKEN=${FAMILY_CRON_TOKEN}
       - BARK_API_KEY=${BARK_API_KEY}
     volumes:
-      - "${FAMILY_SSOT_ROOT}:/ssot:rw"
-      - app-data:/app/app-data
+      - "${FAMILY_DOCUMENTS_ROOT}:/documents:ro"
+      - "${FAMILY_DASHBOARD_STATE_ROOT}:/state:rw"
     restart: unless-stopped
 
   ai-gateway:
@@ -30,5 +31,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  app-data:
   ai-models:
