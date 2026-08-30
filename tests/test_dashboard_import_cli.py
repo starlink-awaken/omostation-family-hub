@@ -125,3 +125,27 @@ def test_cli_plan_apply_and_verify_round_trip(tmp_path: Path, capsys) -> None:
         "selected_fingerprint": verify_output["selected_fingerprint"],
         "status": "verified",
     }
+
+    _write(target / "tests" / "adapted.test.ts", "export {};\n")
+    assert (
+        main(
+            [
+                "verify",
+                "--source",
+                str(source),
+                "--target",
+                str(target),
+                "--redaction-map",
+                str(redaction_map),
+                "--source-receipt",
+                str(source_receipt),
+                "--target-receipt",
+                str(target_receipt),
+                "--allow-adapted-target",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    adapted_output = json.loads(capsys.readouterr().out)
+    assert adapted_output["verification_mode"] == "adapted-target"

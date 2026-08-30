@@ -147,6 +147,16 @@ class VerificationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class AdaptedVerificationResult:
+    ok: bool
+    selected_count: int
+    selected_fingerprint: str
+    full_source_fingerprint: str
+    verification_mode: str
+    excluded_source_drift: bool
+
+
+@dataclass(frozen=True, slots=True)
 class RedactionMapResult:
     replacements: dict[str, str]
     public_summary: dict[str, int | str]
@@ -480,6 +490,84 @@ def verify_import(
     )
 
 
+def _assert_selected_source_unchanged(plan: ImportPlan, source: Path) -> None:
+    for expected in plan.files:
+        if _record(source / expected.relative_path, expected.relative_path) != expected:
+            raise ImportClosedError(f"selected source drift: {expected.relative_path}")
+    for expected in plan.sanitized_files:
+        source_record = _record(source / expected.relative_path, expected.relative_path)
+        if (
+            source_record.mode != expected.mode
+            or source_record.size != expected.source_size
+            or source_record.sha256 != expected.source_sha256
+        ):
+            raise ImportClosedError(f"selected source drift: {expected.relative_path}")
+
+
+def _iter_adapted_target_files(root: Path) -> tuple[FileRecord, ...]:
+    if not root.is_dir() or root.is_symlink():
+        raise ImportClosedError("adapted target is not a safe directory")
+    records: list[FileRecord] = []
+    for current, dirnames, filenames in os.walk(root, followlinks=False):
+        current_path = Path(current)
+        retained_dirs: list[str] = []
+        for dirname in sorted(dirnames):
+            directory = current_path / dirname
+            relative = PurePosixPath(directory.relative_to(root).as_posix())
+            if _forbidden_category(relative) is not None:
+                continue
+            if directory.is_symlink():
+                raise ImportClosedError(f"unsafe adapted target node: {relative.as_posix()}")
+            retained_dirs.append(dirname)
+        dirnames[:] = retained_dirs
+        for filename in sorted(filenames):
+            file_path = current_path / filename
+            relative = PurePosixPath(file_path.relative_to(root).as_posix())
+            if _forbidden_category(relative) is not None:
+                continue
+            records.append(_record(file_path, relative.as_posix()))
+    return tuple(sorted(records, key=lambda record: record.relative_path))
+
+
+def verify_adapted_import(
+    plan: ImportPlan,
+    source: Path,
+    target: Path,
+    *,
+    replacements: dict[str, str],
+) -> AdaptedVerificationResult:
+    if _mapping_digest(replacements) != plan.redaction_map_digest:
+        raise ImportClosedError("redaction map drift")
+    _assert_selected_source_unchanged(plan, source)
+    expected_paths = {record.relative_path for record in plan.files}
+    expected_paths.update(record.relative_path for record in plan.sanitized_files)
+    actual_records = _iter_adapted_target_files(target)
+    actual_paths = {record.relative_path for record in actual_records}
+    missing = sorted(expected_paths - actual_paths)
+    if missing:
+        raise ImportClosedError(f"missing adapted target path: {missing[0]}")
+    private_tokens = tuple(token.encode("utf-8") for token in replacements)
+    for record in actual_records:
+        content = (target / record.relative_path).read_bytes()
+        if any(token in content for token in private_tokens):
+            raise ImportClosedError(f"private token in adapted target: {record.relative_path}")
+    current_source = _iter_source_nodes(source)
+    current_fingerprint = _canonical_fingerprint(record.to_public_dict() for record in current_source)
+    excluded_drift = (
+        len(current_source) != plan.full_source_count
+        or sum(record.size for record in current_source) != plan.full_source_bytes
+        or current_fingerprint != plan.full_source_fingerprint
+    )
+    return AdaptedVerificationResult(
+        ok=True,
+        selected_count=plan.selected_count,
+        selected_fingerprint=plan.selected_fingerprint,
+        full_source_fingerprint=current_fingerprint,
+        verification_mode="adapted-target",
+        excluded_source_drift=excluded_drift,
+    )
+
+
 def write_receipt(plan: ImportPlan, output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(plan.to_public_dict(), ensure_ascii=False, indent=2, sort_keys=True) + "\n"
@@ -586,6 +674,8 @@ def _parser() -> argparse.ArgumentParser:
         subparser.add_argument("--json", action="store_true")
         if command in {"apply", "verify"}:
             subparser.add_argument("--target-receipt", type=Path, required=True)
+        if command == "verify":
+            subparser.add_argument("--allow-adapted-target", action="store_true")
     return parser
 
 
@@ -605,15 +695,34 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     plan = _read_plan(args.source_receipt)
-    fresh = plan_import(args.source, args.target, replacements=replacements)
-    if fresh != plan:
-        raise ImportClosedError("source plan drift")
     if args.command == "apply":
+        fresh = plan_import(args.source, args.target, replacements=replacements)
+        if fresh != plan:
+            raise ImportClosedError("source plan drift")
         apply_import(plan, args.source, args.target, replacements=replacements)
         _write_target_receipt(plan, args.target_receipt)
         print(json.dumps(_public_status("completed", plan), sort_keys=True))
         return 0
     _verify_target_receipt(plan, args.target_receipt)
+    if args.allow_adapted_target:
+        adapted = verify_adapted_import(plan, args.source, args.target, replacements=replacements)
+        print(
+            json.dumps(
+                {
+                    "status": "verified",
+                    "verification_mode": adapted.verification_mode,
+                    "selected_count": adapted.selected_count,
+                    "selected_fingerprint": adapted.selected_fingerprint,
+                    "full_source_fingerprint": adapted.full_source_fingerprint,
+                    "excluded_source_drift": adapted.excluded_source_drift,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+    fresh = plan_import(args.source, args.target, replacements=replacements)
+    if fresh != plan:
+        raise ImportClosedError("source plan drift")
     result = verify_import(plan, args.source, args.target, replacements=replacements)
     print(
         json.dumps(

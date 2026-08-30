@@ -10,6 +10,7 @@ from tools.dashboard_import import (
     apply_import,
     derive_redaction_map,
     plan_import,
+    verify_adapted_import,
     verify_import,
     write_receipt,
 )
@@ -204,3 +205,30 @@ def test_receipt_contains_hashes_but_not_private_values(tmp_path: Path) -> None:
     assert "Private Person" not in payload
     assert "Synthetic Member 01" not in payload
     assert plan.redaction_map_digest in payload
+
+
+def test_adapted_verify_allows_safe_git_changes_and_excluded_cache_drift(tmp_path: Path) -> None:
+    source = _minimal_source(tmp_path)
+    target = tmp_path / "target"
+    plan = plan_import(source, target, replacements={})
+    apply_import(plan, source, target, replacements={})
+    _write(target / "src" / "page.tsx", "export default function Adapted() {}\n")
+    _write(target / "tests" / "boundary.test.ts", "export {};\n")
+    _write(source / "node_modules" / ".cache" / "result.json", "{}\n")
+
+    result = verify_adapted_import(plan, source, target, replacements={})
+
+    assert result.ok
+    assert result.verification_mode == "adapted-target"
+    assert result.excluded_source_drift
+
+
+def test_adapted_verify_rejects_selected_source_drift(tmp_path: Path) -> None:
+    source = _minimal_source(tmp_path)
+    target = tmp_path / "target"
+    plan = plan_import(source, target, replacements={})
+    apply_import(plan, source, target, replacements={})
+    _write(source / "src" / "page.tsx", "changed source\n")
+
+    with pytest.raises(ImportClosedError, match="selected source drift"):
+        verify_adapted_import(plan, source, target, replacements={})
