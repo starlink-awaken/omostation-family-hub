@@ -2,6 +2,7 @@ import Link from "next/link";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getSsotRoot, resolveSsotPath } from "@/lib/ssot";
+import { statePath } from "@/lib/paths";
 import { extractSummaryFromMarkdown, stripFrontmatter } from "@/lib/extract";
 import { DocAiSummary } from "@/components/shared/DocAiSummary";
 import { MermaidDoc } from "@/components/shared/MermaidDoc";
@@ -18,7 +19,7 @@ type TagIndex = {
 
 async function loadTagIndex(): Promise<TagIndex> {
   try {
-    const raw = await readFile(path.join(process.cwd(), "app-data", "tags.json"), "utf8");
+    const raw = await readFile(statePath("generated", "tags.json"), "utf8");
     return JSON.parse(raw);
   } catch {
     return { tags: {}, docs: {} };
@@ -39,7 +40,7 @@ type LinksIndex = {
 
 async function loadLinksIndex(): Promise<LinksIndex> {
   try {
-    const raw = await readFile(path.join(process.cwd(), "app-data", "links.json"), "utf8");
+    const raw = await readFile(statePath("generated", "links.json"), "utf8");
     return JSON.parse(raw);
   } catch {
     return { links: {}, backlinks: {} };

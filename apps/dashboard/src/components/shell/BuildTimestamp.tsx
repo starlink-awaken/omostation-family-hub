@@ -1,10 +1,10 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
+import { statePath } from "@/lib/paths";
 
 export async function BuildTimestamp() {
   let label = "数据加载中";
   try {
-    const metaPath = path.join(process.cwd(), "app-data", "build-meta.json");
+    const metaPath = statePath("generated", "build-meta.json");
     const raw = await readFile(metaPath, "utf8");
     const { builtAt } = JSON.parse(raw) as { builtAt: string };
     const d = new Date(builtAt);

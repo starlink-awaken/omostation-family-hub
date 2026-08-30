@@ -2,12 +2,13 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { authenticateCron } from "@/lib/cron-auth";
+import { statePath } from "@/lib/paths";
 
 export async function GET(request: Request) {
   const auth = authenticateCron(request);
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: 401 });
 
-  const appData = path.join(process.cwd(), "app-data");
+  const appData = statePath("generated");
   const today = new Date();
   const weekAgo = new Date(today.getTime() - 7 * 86400000);
   const weekStr = `${weekAgo.toISOString().slice(0, 10)} ~ ${today.toISOString().slice(0, 10)}`;

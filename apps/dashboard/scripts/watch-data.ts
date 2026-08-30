@@ -2,6 +2,7 @@ import { watch } from "node:fs";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { getSsotRoot } from "../src/lib/ssot";
+import { statePath } from "../src/lib/paths";
 
 const ROOT = getSsotRoot();
 const PROJECT = path.resolve(process.cwd());
@@ -9,7 +10,7 @@ const WATCH_DIRS = [
   path.join(ROOT, "_knowledge"),
   path.join(ROOT, "_archive"),
   path.join(ROOT, "_control"),
-  path.join(PROJECT, "data-manifest"),
+  statePath("manifests"),
 ];
 
 let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -59,7 +60,7 @@ for (const dir of WATCH_DIRS) {
   }
 }
 
-console.log(`[watch-data] ready — changes in _knowledge, _archive, _control, data-manifest auto-rebuild`);
+console.log(`[watch-data] ready — Documents content and state manifests auto-rebuild`);
 
 process.on("SIGINT", () => {
   process.exit(0);

@@ -1,10 +1,10 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { NextResponse } from "next/server";
+import { statePath } from "@/lib/paths";
 
 export async function GET() {
   try {
-    const raw = await readFile(path.join(process.cwd(), "app-data", "links.json"), "utf8");
+    const raw = await readFile(statePath("generated", "links.json"), "utf8");
     return NextResponse.json(JSON.parse(raw));
   } catch {
     return NextResponse.json({ links: {}, backlinks: {} });

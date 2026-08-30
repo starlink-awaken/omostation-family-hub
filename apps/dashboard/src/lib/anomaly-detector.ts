@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { aiChat } from "@/lib/ai";
+import { statePath } from "@/lib/paths";
 
 export interface Anomaly {
   type: "spending_spike" | "health_due" | "task_overdue" | "summary";
@@ -21,7 +21,7 @@ export async function checkAnomalies(): Promise<Anomaly[]> {
   const anomalies: Anomaly[] = [];
 
   try {
-    const fp = path.join(process.cwd(), "app-data", "finance.json");
+    const fp = statePath("generated", "finance.json");
     const raw = await readFile(fp, "utf8");
     const financeData = JSON.parse(raw);
 
@@ -65,7 +65,7 @@ export async function checkAnomalies(): Promise<Anomaly[]> {
   }
 
   try {
-    const fp = path.join(process.cwd(), "app-data", "health.json");
+    const fp = statePath("generated", "health.json");
     const raw = await readFile(fp, "utf8");
     const healthData = JSON.parse(raw);
     const reminders = healthData.reminders || [];
@@ -83,7 +83,7 @@ export async function checkAnomalies(): Promise<Anomaly[]> {
   }
 
   try {
-    const fp = path.join(process.cwd(), "app-data", "tasks.json");
+    const fp = statePath("generated", "tasks.json");
     const raw = await readFile(fp, "utf8");
     const tasksData = JSON.parse(raw);
     const allTasks = tasksData.tasks || tasksData.items || [];

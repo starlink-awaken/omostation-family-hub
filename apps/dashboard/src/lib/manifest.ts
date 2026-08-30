@@ -3,6 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import YAML from "yaml";
 import { ssotPath } from "./ssot";
+import { statePath } from "./paths";
 
 const DOMAIN_DIR_MAP: Record<string, string[]> = {
   health:  ["_knowledge/02.医疗健康"],
@@ -12,11 +13,34 @@ const DOMAIN_DIR_MAP: Record<string, string[]> = {
   assets:  ["_knowledge/05.资产设备"],
 };
 
+const DOMAIN_DEFAULTS: Record<string, { title: string; description: string }> = {
+  members: { title: "家庭成员", description: "成员档案与角色线索" },
+  health: { title: "医疗健康", description: "健康档案与提醒线索" },
+  growth: { title: "育儿成长", description: "成长记录与阶段线索" },
+  daily: { title: "家庭日常", description: "日常安排与协同线索" },
+  assets: { title: "资产设备", description: "家庭资产与维护线索" },
+};
+
+const SUMMARY_DEFAULT_ENTRIES = {
+  primary: { title: "家庭成员", href: "/members" },
+  secondary: [
+    { title: "医疗健康", href: "/health" },
+    { title: "育儿成长", href: "/growth" },
+    { title: "家庭日常", href: "/daily" },
+    { title: "资产设备", href: "/assets" },
+  ],
+};
+
 export type ManifestItem = {
   id: string;
   title: string;
   sourcePath: string;
   sourceTitle?: string;
+};
+
+type SummaryEntry = {
+  title: string;
+  href: string;
 };
 
 export type RawManifest = {
@@ -87,11 +111,12 @@ export async function loadDomainManifest(domain: string): Promise<{
   links: Array<{ title: string; href: string }>;
   items: ManifestItem[];
 }> {
-  const manifestPath = path.join(process.cwd(), "data-manifest", `${domain}.yaml`);
-  let raw: RawManifest = { title: domain, description: "", focus: [], nextActions: [], links: [], items: [] };
+  const defaults = DOMAIN_DEFAULTS[domain] ?? { title: domain, description: "" };
+  const manifestPath = statePath("manifests", `${domain}.yaml`);
+  let raw: RawManifest = { ...defaults, focus: [], nextActions: [], links: [], items: [] };
   try {
     const content = await readFile(manifestPath, "utf8");
-    raw = (YAML.parse(content) as RawManifest) ?? raw;
+    raw = { ...raw, ...((YAML.parse(content) as Partial<RawManifest>) ?? {}) };
   } catch {}
 
   const items = raw.items && raw.items.length > 0
@@ -110,21 +135,25 @@ export async function loadDomainManifest(domain: string): Promise<{
 
 export async function loadSummaryManifest(): Promise<{
   weekFocus: ManifestItem[];
-  entries: { primary?: ManifestItem; secondary?: ManifestItem[] };
+  entries: { primary?: SummaryEntry; secondary?: SummaryEntry[] };
 }> {
-  const manifestPath = path.join(process.cwd(), "data-manifest", "summary.yaml");
-  let raw: { summary?: { weekFocus?: ManifestItem[]; entries?: { primary?: ManifestItem; secondary?: ManifestItem[] } } } = {};
+  const manifestPath = statePath("manifests", "summary.yaml");
+  let raw: {
+    summary?: { weekFocus?: ManifestItem[]; entries?: { primary?: SummaryEntry; secondary?: SummaryEntry[] } };
+    weekFocus?: ManifestItem[];
+    entries?: { primary?: SummaryEntry; secondary?: SummaryEntry[] };
+  } = {};
   try {
     const content = await readFile(manifestPath, "utf8");
     raw = (YAML.parse(content) as Record<string, unknown>) ?? {};
   } catch {}
 
-  const s = raw.summary ?? {};
+  const s = raw.summary ?? raw;
   return {
     weekFocus: s.weekFocus ?? [],
     entries: {
-      primary: s.entries?.primary,
-      secondary: s.entries?.secondary ?? [],
+      primary: s.entries?.primary ?? SUMMARY_DEFAULT_ENTRIES.primary,
+      secondary: s.entries?.secondary ?? SUMMARY_DEFAULT_ENTRIES.secondary,
     },
   };
 }

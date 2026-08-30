@@ -26,7 +26,8 @@ FAMILY_DASHBOARD_COOKIE_TTL_DAYS=7
 如果家庭 SSOT 不在应用上一级目录，需要额外指定：
 
 ```bash
-export FAMILY_SSOT_ROOT=/absolute/path/to/your/family-ssot
+export FAMILY_DOCUMENTS_ROOT=/absolute/path/to/read-only/family-documents
+export FAMILY_DASHBOARD_STATE_ROOT=/absolute/path/to/workspace/runtime/family-hub/dashboard
 ```
 
 默认情况下，构建脚本会把 `process.cwd()` 的上一级目录视为 SSOT 根目录。

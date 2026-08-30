@@ -1,10 +1,10 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import crypto from "node:crypto";
 import YAML from "yaml";
 import { extractFrontmatter, normalizeInlineText, stripFrontmatter } from "../../src/lib/extract";
 import { redactText } from "../../src/lib/redact";
 import { ssotPath } from "../../src/lib/ssot";
+import { statePath } from "../../src/lib/paths";
 import type { Item } from "../../src/types/common";
 
 export type BuilderResult = {
@@ -93,7 +93,7 @@ export async function readSsotFile(relativePath: string): Promise<string> {
 }
 
 export async function loadRawYaml<T>(fileName: string): Promise<Partial<T>> {
-  const manifestPath = path.join(process.cwd(), "data-manifest", fileName);
+  const manifestPath = statePath("manifests", fileName);
   const raw = await readFile(manifestPath, "utf8");
   return (YAML.parse(raw) as Partial<T>) ?? {};
 }

@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises"
-import path from "node:path"
 import { NextResponse } from "next/server"
+import { statePath } from "@/lib/paths"
 
 export async function GET() {
   let totalTags = 0
@@ -9,7 +9,7 @@ export async function GET() {
   const docMap: Record<string, string> = {}
 
   try {
-    const raw = await readFile(path.join(process.cwd(), "app-data", "tags.json"), "utf8")
+    const raw = await readFile(statePath("generated", "tags.json"), "utf8")
     const tagIndex = JSON.parse(raw)
     totalTags = Object.keys(tagIndex.tags || {}).length
     topTags = (Object.entries(tagIndex.tags || {}) as [string, { count: number }][])
@@ -28,7 +28,7 @@ export async function GET() {
   let orphanDocs: { path: string; title: string }[] = []
 
   try {
-    const raw = await readFile(path.join(process.cwd(), "app-data", "links.json"), "utf8")
+    const raw = await readFile(statePath("generated", "links.json"), "utf8")
     const linkIndex = JSON.parse(raw)
     const backlinks = linkIndex.backlinks || {}
     totalLinks = (Object.values(backlinks) as unknown[][]).reduce((s, arr) => s + arr.length, 0)
@@ -67,7 +67,7 @@ export async function GET() {
 
   let totalDocs = 0
   try {
-    const raw = await readFile(path.join(process.cwd(), "app-data", "search-index.json"), "utf8")
+    const raw = await readFile(statePath("generated", "search-index.json"), "utf8")
     const docs = JSON.parse(raw)
     totalDocs = Array.isArray(docs) ? docs.length : 0
   } catch {
@@ -77,7 +77,7 @@ export async function GET() {
   const recentChanges = 0
   let builtAt: string | null = null
   try {
-    const raw = await readFile(path.join(process.cwd(), "app-data", "build-meta.json"), "utf8")
+    const raw = await readFile(statePath("generated", "build-meta.json"), "utf8")
     const meta = JSON.parse(raw)
     builtAt = meta.builtAt || null
   } catch {}

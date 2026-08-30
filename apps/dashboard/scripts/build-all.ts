@@ -18,6 +18,7 @@ import {
   buildLinksIndex,
 } from "./builders/index-builders";
 import { measure, printSummary, type BuilderResult } from "./builders/common";
+import { statePath } from "../src/lib/paths";
 
 const DOMAIN_KEYS: DomainKey[] = [
   "members",
@@ -43,7 +44,7 @@ async function writeAndVerify(filePath: string, data: unknown): Promise<void> {
 }
 
 async function main() {
-  const outputDir = path.join(process.cwd(), "app-data");
+  const outputDir = statePath("generated");
   await mkdir(outputDir, { recursive: true });
 
   const results: BuilderResult[] = [];

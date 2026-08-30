@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { NextResponse } from "next/server";
+import { statePath } from "@/lib/paths";
 
 export type MonthlyCost = {
   month: string;
@@ -25,7 +25,7 @@ type FinanceData = {
 
 export async function GET() {
   try {
-    const fp = path.join(process.cwd(), "app-data", "finance.json");
+    const fp = statePath("generated", "finance.json");
     const raw = await readFile(fp, "utf8");
     const data: FinanceData = JSON.parse(raw);
 

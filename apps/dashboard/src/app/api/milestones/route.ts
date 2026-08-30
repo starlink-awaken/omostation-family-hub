@@ -1,12 +1,12 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { NextResponse } from "next/server";
+import { statePath } from "@/lib/paths";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const fp = path.join(process.cwd(), "app-data", "milestones.json");
+    const fp = statePath("generated", "milestones.json");
     const raw = await readFile(fp, "utf8");
     return NextResponse.json(JSON.parse(raw));
   } catch {

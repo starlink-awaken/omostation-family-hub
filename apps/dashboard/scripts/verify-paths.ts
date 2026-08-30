@@ -1,6 +1,7 @@
 import { readFile, access } from "node:fs/promises";
 import path from "node:path";
 import { ssotPath } from "../src/lib/ssot";
+import { statePath } from "../src/lib/paths";
 
 async function checkPath(rel: string, label: string): Promise<{ ok: boolean; msg: string }> {
   const resolved = ssotPath(rel);
@@ -43,7 +44,7 @@ async function findDocHrefs(filePath: string): Promise<{ rel: string; line: numb
 }
 
 async function main(): Promise<void> {
-  const manifestDir = path.resolve(process.cwd(), "data-manifest");
+  const manifestDir = statePath("manifests");
   let totalChecked = 0;
   let totalMissing = 0;
   const missingFiles: string[] = [];
@@ -77,24 +78,21 @@ async function main(): Promise<void> {
   const srcFiles = [
     "src/lib/person-registry.ts",
     "src/app/(app)/finance/page.tsx",
-    "data-manifest/daily.yaml",
-    "data-manifest/summary.yaml",
-    "data-manifest/members.yaml",
-    "data-manifest/health.yaml",
-    "data-manifest/growth.yaml",
-    "data-manifest/assets.yaml",
   ];
-  for (const relPath of srcFiles) {
-    const fp = path.resolve(process.cwd(), relPath);
+  const filesToScan = [
+    ...srcFiles.map((label) => ({ label, path: path.resolve(process.cwd(), label) })),
+    ...manifests.map((name) => ({ label: `manifests/${name}`, path: path.join(manifestDir, name) })),
+  ];
+  for (const sourceFile of filesToScan) {
     let refs: { rel: string; line: number }[];
     try {
-      refs = await findDocHrefs(fp);
+      refs = await findDocHrefs(sourceFile.path);
     } catch {
       continue;
     }
     for (const ref of refs) {
       totalChecked++;
-      const r = await checkPath(ref.rel, `${relPath}:${ref.line}`);
+      const r = await checkPath(ref.rel, `${sourceFile.label}:${ref.line}`);
       if (!r.ok) { totalMissing++; missingFiles.push(r.msg); console.error(r.msg); }
     }
   }

@@ -1,8 +1,8 @@
 import { buildEmbeddings, buildChunkEmbeddings } from "./builders/embedding-builders";
 import { measure, printSummary } from "./builders/common";
-import path from "node:path";
+import { statePath } from "../src/lib/paths";
 
-const outputDir = path.join(process.cwd(), "app-data");
+const outputDir = statePath("generated");
 
 async function main() {
   const results = [];

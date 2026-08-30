@@ -7,16 +7,18 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { loadDomainManifest, loadSummaryManifest } from "./manifest";
 
 afterEach(() => {
-  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe("manifest loaders", () => {
   test("缺省 summary manifest 时使用内置导航兜底", async () => {
-    const cwd = await mkdtemp(path.join(os.tmpdir(), "family-dashboard-app-manifest-"));
-    const manifestDir = path.join(cwd, "data-manifest");
+    const stateRoot = await mkdtemp(path.join(os.tmpdir(), "family-dashboard-state-"));
+    const documentsRoot = await mkdtemp(path.join(os.tmpdir(), "family-dashboard-documents-"));
+    const manifestDir = path.join(stateRoot, "manifests");
     await mkdir(manifestDir, { recursive: true });
     await writeFile(path.join(manifestDir, "summary.yaml"), "{}", "utf8");
-    vi.spyOn(process, "cwd").mockReturnValue(cwd);
+    vi.stubEnv("FAMILY_DOCUMENTS_ROOT", documentsRoot);
+    vi.stubEnv("FAMILY_DASHBOARD_STATE_ROOT", stateRoot);
 
     await expect(loadSummaryManifest()).resolves.toEqual({
       weekFocus: [],
@@ -33,8 +35,9 @@ describe("manifest loaders", () => {
   });
 
   test("domain manifest 会合并 YAML 内容与默认值", async () => {
-    const cwd = await mkdtemp(path.join(os.tmpdir(), "family-dashboard-app-domain-"));
-    const manifestDir = path.join(cwd, "data-manifest");
+    const stateRoot = await mkdtemp(path.join(os.tmpdir(), "family-dashboard-state-"));
+    const documentsRoot = await mkdtemp(path.join(os.tmpdir(), "family-dashboard-documents-"));
+    const manifestDir = path.join(stateRoot, "manifests");
     await mkdir(manifestDir, { recursive: true });
     await writeFile(
       path.join(manifestDir, "members.yaml"),
@@ -47,7 +50,8 @@ describe("manifest loaders", () => {
       ].join("\n"),
       "utf8",
     );
-    vi.spyOn(process, "cwd").mockReturnValue(cwd);
+    vi.stubEnv("FAMILY_DOCUMENTS_ROOT", documentsRoot);
+    vi.stubEnv("FAMILY_DASHBOARD_STATE_ROOT", stateRoot);
 
     await expect(loadDomainManifest("members")).resolves.toEqual({
       title: "核心成员",

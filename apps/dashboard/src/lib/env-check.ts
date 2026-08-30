@@ -1,6 +1,7 @@
 const REQUIRED_VARS: { key: string; hint: string }[] = [
   { key: "FAMILY_DASHBOARD_PASSWORD", hint: "登录口令" },
-  { key: "FAMILY_SSOT_ROOT", hint: "知识库根目录" },
+  { key: "FAMILY_DOCUMENTS_ROOT", hint: "只读家庭文档根目录" },
+  { key: "FAMILY_DASHBOARD_STATE_ROOT", hint: "Workspace 运行状态根目录" },
 ];
 
 export function checkEnv() {

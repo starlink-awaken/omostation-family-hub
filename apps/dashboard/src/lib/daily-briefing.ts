@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
+import { statePath } from "@/lib/paths";
 import { aiChat } from "@/lib/ai";
 import { getDueHealthReminders } from "@/lib/health-check";
 import { getYesterdayFinanceDigest } from "@/lib/finance-digest";
@@ -21,7 +21,7 @@ async function fetchWeather(): Promise<string> {
 
 async function getCalendarToday(): Promise<string[]> {
   try {
-    const raw = await readFile(path.join(process.cwd(), "data-manifest", "summary.yaml"), "utf8");
+    const raw = await readFile(statePath("manifests", "summary.yaml"), "utf8");
     const todayMatch = raw.match(/todayEntries:\s*\[([\s\S]*?)\]/);
     if (todayMatch) {
       return todayMatch[1]

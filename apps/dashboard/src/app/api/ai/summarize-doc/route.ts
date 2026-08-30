@@ -4,8 +4,9 @@ import { NextResponse } from "next/server";
 import { resolveSsotPath } from "@/lib/ssot";
 import { stripFrontmatter } from "@/lib/extract";
 import { aiChat } from "@/lib/ai";
+import { statePath } from "@/lib/paths";
 
-const CACHE_DIR = path.join(process.cwd(), "app-data", ".ai-summary-cache");
+const CACHE_DIR = statePath("cache", "ai-summary");
 
 function docPathToCacheKey(docPath: string): string {
   return docPath.replace(/[/\\:?&%]/g, "_").replace(/__+/g, "_").replace(/^_|_$/g, "").toLowerCase();

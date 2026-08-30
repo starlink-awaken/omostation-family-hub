@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
-import path from "node:path";
+import { statePath } from "../src/lib/paths";
 
 type SummaryJson = {
   meta?: {
@@ -37,7 +37,7 @@ function isIsoDateTime(input: string | undefined): boolean {
 }
 
 async function main() {
-  const summaryPath = path.join(process.cwd(), "app-data", "summary.json");
+  const summaryPath = statePath("generated", "summary.json");
   const summary = await readJson(summaryPath);
 
   assert.equal(summary.meta?.schemaVersion, "v1");

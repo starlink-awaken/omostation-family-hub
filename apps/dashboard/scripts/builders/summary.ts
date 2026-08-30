@@ -129,8 +129,8 @@ export async function buildSummary(): Promise<SummaryData> {
     },
     weekFocus,
     entries: {
-      primary: manifest.entries?.primary ? { title: manifest.entries.primary.title, href: manifest.entries.primary.sourcePath } : undefined,
-      secondary: (manifest.entries?.secondary ?? []).map((e) => ({ title: e.title, href: e.sourcePath })),
+      primary: manifest.entries?.primary,
+      secondary: manifest.entries?.secondary ?? [],
     },
     recentUpdates: parseTimelineItems(timelineMd),
     signals: parseSignalItems(signalsMd),

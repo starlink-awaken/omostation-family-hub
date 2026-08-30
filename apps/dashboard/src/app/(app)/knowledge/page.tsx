@@ -2,6 +2,7 @@ import Link from "next/link";
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { getSsotRoot } from "@/lib/ssot";
+import { statePath } from "@/lib/paths";
 import { scannablePaths } from "@/lib/task-extractor";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +18,7 @@ type KbStats = {
 };
 
 async function getKbStats(): Promise<KbStats> {
-  const appData = path.join(process.cwd(), "app-data");
+  const appData = statePath("generated");
   let totalTags = 0;
   let topTags: { name: string; count: number }[] = [];
   let allDocPaths: string[] = [];

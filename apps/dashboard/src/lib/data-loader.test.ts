@@ -7,20 +7,22 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { loadAppData } from "./data-loader";
 
 afterEach(() => {
-  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe("loadAppData", () => {
-  test("从 app-data 目录读取并解析 JSON", async () => {
-    const cwd = await mkdtemp(path.join(os.tmpdir(), "family-dashboard-app-data-"));
-    const appDataDir = path.join(cwd, "app-data");
-    await mkdir(appDataDir, { recursive: true });
+  test("reads generated JSON only from the explicit state root", async () => {
+    const stateRoot = await mkdtemp(path.join(os.tmpdir(), "family-dashboard-state-"));
+    const documentsRoot = await mkdtemp(path.join(os.tmpdir(), "family-dashboard-documents-"));
+    const generatedDir = path.join(stateRoot, "generated");
+    await mkdir(generatedDir, { recursive: true });
     await writeFile(
-      path.join(appDataDir, "summary.json"),
+      path.join(generatedDir, "summary.json"),
       JSON.stringify({ ok: true, count: 2 }),
       "utf8",
     );
-    vi.spyOn(process, "cwd").mockReturnValue(cwd);
+    vi.stubEnv("FAMILY_DOCUMENTS_ROOT", documentsRoot);
+    vi.stubEnv("FAMILY_DASHBOARD_STATE_ROOT", stateRoot);
 
     await expect(loadAppData<{ ok: boolean; count: number }>("summary.json")).resolves.toEqual({
       ok: true,

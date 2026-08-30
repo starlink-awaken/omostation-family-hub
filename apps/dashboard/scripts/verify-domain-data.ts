@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import path from "node:path";
+import { statePath } from "../src/lib/paths";
 
 type DomainJson = {
   meta?: {
@@ -42,7 +43,7 @@ function isIsoDateTime(input: string | undefined): boolean {
 }
 
 async function main() {
-  const appDataDir = path.join(process.cwd(), "app-data");
+  const appDataDir = statePath("generated");
 
   for (const fileName of DOMAIN_FILES) {
     const filePath = path.join(appDataDir, fileName);

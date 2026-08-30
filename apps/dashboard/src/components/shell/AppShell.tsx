@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { TopNav } from "./TopNav";
 import { BuildTimestamp } from "./BuildTimestamp";
 import { SearchOverlay } from "../search/SearchOverlay";
 import type { SearchDoc } from "@/lib/search";
+import { statePath } from "@/lib/paths";
 
 export async function AppShell({
   children,
@@ -14,7 +14,7 @@ export async function AppShell({
   let searchDocs: SearchDoc[] = [];
   try {
     const raw = await readFile(
-      path.join(process.cwd(), "app-data", "search-index.json"),
+      statePath("generated", "search-index.json"),
       "utf8"
     );
     searchDocs = JSON.parse(raw);

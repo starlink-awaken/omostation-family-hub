@@ -1,30 +1,18 @@
 import path from "node:path";
+import { documentsRoot, resolveDocumentsPath } from "./paths";
 
 export function getSsotRoot(): string {
-  return process.env.FAMILY_SSOT_ROOT || path.resolve(process.cwd(), "..");
+  return documentsRoot();
 }
 
 export function ssotPath(...parts: string[]): string {
-  return path.join(getSsotRoot(), ...parts);
+  const resolved = resolveDocumentsPath(path.join(...parts));
+  if (!resolved) throw new Error("Documents path is unsafe");
+  return resolved;
 }
 
 export function resolveSsotPath(relativePath: string): string | null {
-  if (!relativePath) return null;
-  if (relativePath.includes("\0")) return null;
-  if (relativePath.startsWith("/") || relativePath.startsWith("\\")) return null;
-
-  const root = getSsotRoot();
-  const resolvedRoot = path.resolve(root);
-  const resolved = path.resolve(resolvedRoot, relativePath);
-
-  if (resolved === resolvedRoot) return resolved;
-
-  const prefix = resolvedRoot.endsWith(path.sep)
-    ? resolvedRoot
-    : resolvedRoot + path.sep;
-  if (!resolved.startsWith(prefix)) return null;
-
-  return resolved;
+  return resolveDocumentsPath(relativePath);
 }
 
 const WRITABLE_ROOTS = [

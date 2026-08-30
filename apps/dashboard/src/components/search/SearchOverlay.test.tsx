@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { SearchOverlay } from "./SearchOverlay";
 
-const MOCK_DOCS = [{ path: "doc.md", title: "测试文档", text: "内容", tags: [], id: "1" }];
+const MOCK_DOCS = [{ path: "doc.md", title: "测试文档", excerpt: "内容", text: "内容", tags: [], id: "1" }];
 
 describe("SearchOverlay", () => {
   test("renders nothing when closed", () => {

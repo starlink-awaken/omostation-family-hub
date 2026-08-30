@@ -1,10 +1,10 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { NextResponse } from "next/server";
+import { statePath } from "@/lib/paths";
 
 export async function GET() {
   try {
-    const fp = path.join(process.cwd(), "app-data", "timeline.json");
+    const fp = statePath("generated", "timeline.json");
     const raw = await readFile(fp, "utf8");
     const entries = JSON.parse(raw);
     return NextResponse.json(entries, {

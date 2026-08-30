@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import { statePath } from "@/lib/paths";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ function escapeIcs(text: string): string {
 
 export async function GET() {
   try {
-    const appData = path.join(process.cwd(), "app-data");
+    const appData = statePath("generated");
     const ms = JSON.parse(await readFile(path.join(appData, "milestones.json"), "utf8"));
     let vac = null;
     try {

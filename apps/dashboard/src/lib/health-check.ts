@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import YAML from "yaml";
 import { resolveSsotPath } from "@/lib/ssot";
+import { statePath } from "@/lib/paths";
 import { stripFrontmatter } from "@/lib/extract";
 
 export interface HealthReminder {
@@ -45,7 +45,7 @@ function normalizeDate(
 }
 
 export async function getDueHealthReminders(): Promise<HealthReminder[]> {
-  const manifestPath = path.join(process.cwd(), "data-manifest", "health.yaml");
+  const manifestPath = statePath("manifests", "health.yaml");
 
   let raw: string;
   try {

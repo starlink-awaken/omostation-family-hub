@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Card } from "@/components/shared/Card";
+import { statePath } from "@/lib/paths";
 
 type TagIndex = {
   tags: Record<string, { count: number; docIds: string[] }>;
@@ -11,7 +11,7 @@ type TagIndex = {
 
 async function loadTagIndex(): Promise<TagIndex> {
   try {
-    const raw = await readFile(path.join(process.cwd(), "app-data", "tags.json"), "utf8");
+    const raw = await readFile(statePath("generated", "tags.json"), "utf8");
     return JSON.parse(raw);
   } catch {
     return { tags: {}, docs: {} };

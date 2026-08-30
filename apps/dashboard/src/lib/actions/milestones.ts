@@ -4,13 +4,14 @@ import { revalidatePath } from "next/cache";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ssotPath } from "@/lib/ssot";
+import { statePath } from "@/lib/paths";
 import { updateVaccineStatus, markMilestoneAchieved } from "@/lib/ssot-writer";
 import { parseVaccines } from "@/lib/parsers/vaccine-parser";
 import { parseMilestones } from "@/lib/parsers/milestone-parser";
 
 const VACCINE_FILE = "_knowledge/02.医疗健康/Synthetic Member 02/疫苗接种计划.md";
 const MILESTONE_FILE = "_knowledge/03.育儿成长/Synthetic Member 02发育里程碑.md";
-const APP_DATA_DIR = path.join(process.cwd(), "app-data");
+const APP_DATA_DIR = statePath("generated");
 
 async function refreshVaccineJson(): Promise<void> {
   const raw = await readFile(ssotPath(VACCINE_FILE), "utf8");

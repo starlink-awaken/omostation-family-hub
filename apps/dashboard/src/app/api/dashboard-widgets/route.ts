@@ -1,10 +1,8 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { NextResponse } from "next/server";
+import { statePath } from "@/lib/paths";
 
 export async function GET() {
-  const cwd = process.cwd();
-
   let docCount = 0;
   let healthOverview = "";
   let healthPriorities: string[] = [];
@@ -14,13 +12,13 @@ export async function GET() {
   let recentDocs: { title: string; path: string }[] = [];
 
   try {
-    const raw = await readFile(path.join(cwd, "app-data", "search-index.json"), "utf8");
+    const raw = await readFile(statePath("generated", "search-index.json"), "utf8");
     const docs = JSON.parse(raw);
     docCount = Array.isArray(docs) ? docs.length : 0;
   } catch {}
 
   try {
-    const raw = await readFile(path.join(cwd, "app-data", "health.json"), "utf8");
+    const raw = await readFile(statePath("generated", "health.json"), "utf8");
     const data = JSON.parse(raw);
     const hs = data.healthSections || {};
     if (hs.overviewSummary) healthOverview = hs.overviewSummary;
@@ -28,7 +26,7 @@ export async function GET() {
   } catch {}
 
   try {
-    const raw = await readFile(path.join(cwd, "app-data", "growth.json"), "utf8");
+    const raw = await readFile(statePath("generated", "growth.json"), "utf8");
     const data = JSON.parse(raw);
     const gs = data.growthSections || {};
     if (gs.heroSummaries?.length) {
@@ -39,7 +37,7 @@ export async function GET() {
   } catch {}
 
   try {
-    const raw = await readFile(path.join(cwd, "app-data", "summary.json"), "utf8");
+    const raw = await readFile(statePath("generated", "summary.json"), "utf8");
     const data = JSON.parse(raw);
     if (data.recentUpdates) {
       recentDocs = data.recentUpdates.slice(0, 5);

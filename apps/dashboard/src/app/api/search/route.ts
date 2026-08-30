@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { NextResponse } from "next/server";
 import { aiEmbed } from "@/lib/ai";
 import { scoreDoc, cosineSimilarity } from "@/lib/search";
 import type { SearchDoc } from "@/lib/search";
+import { statePath } from "@/lib/paths";
 
 export async function POST(request: Request) {
   try {
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     }
 
     const raw = await readFile(
-      path.join(process.cwd(), "app-data", "search-index.json"),
+      statePath("generated", "search-index.json"),
       "utf8"
     );
     const docs: SearchDoc[] = JSON.parse(raw);
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       let embeddings: number[][] = [];
       try {
         const embRaw = await readFile(
-          path.join(process.cwd(), "app-data", "search-embeddings.json"),
+          statePath("cache", "search-embeddings.json"),
           "utf8"
         );
         embeddings = JSON.parse(embRaw);

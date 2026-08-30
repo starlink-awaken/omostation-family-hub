@@ -1,8 +1,8 @@
 import { readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { aiStreamChat, aiEmbed } from "@/lib/ai";
 import type { SearchChunk } from "@/lib/search";
 import { scoreChunk, cosineSimilarity } from "@/lib/search";
+import { statePath } from "@/lib/paths";
 
 export async function POST(request: Request) {
   try {
@@ -13,13 +13,13 @@ export async function POST(request: Request) {
     }
 
     const chunksRaw = await readFile(
-      path.join(process.cwd(), "app-data", "search-chunks.json"),
+      statePath("generated", "search-chunks.json"),
       "utf8"
     );
     const chunks: SearchChunk[] = JSON.parse(chunksRaw);
 
     let chunkEmbeddings: number[][] | null = null;
-    const embPath = path.join(process.cwd(), "app-data", "search-chunks-embeddings.json");
+    const embPath = statePath("cache", "search-chunks-embeddings.json");
     try {
       const embRaw = await readFile(embPath, "utf8");
       chunkEmbeddings = JSON.parse(embRaw);
@@ -27,7 +27,7 @@ export async function POST(request: Request) {
       // Lazy: generate embeddings on first ask if missing
       try {
         const chunksRaw = await readFile(
-          path.join(process.cwd(), "app-data", "search-chunks.json"),
+          statePath("generated", "search-chunks.json"),
           "utf8"
         );
         const chunks: SearchChunk[] = JSON.parse(chunksRaw);

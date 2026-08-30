@@ -1,10 +1,10 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { NextResponse } from "next/server";
+import { statePath } from "@/lib/paths";
 
 export async function GET() {
   try {
-    const index = path.join(process.cwd(), "app-data", "search-index.json");
+    const index = statePath("generated", "search-index.json");
     const raw = await readFile(index, "utf8");
     return new NextResponse(raw, {
       status: 200,

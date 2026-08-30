@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { NextResponse } from "next/server";
+import { statePath } from "@/lib/paths";
 
-const DATA_FILE = path.join(process.cwd(), "app-data", "tasks.json");
+const DATA_FILE = statePath("generated", "tasks.json");
 
 export async function POST() {
   try {

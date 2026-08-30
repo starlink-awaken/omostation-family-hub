@@ -1,5 +1,4 @@
 import { readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { ssotPath } from "@/lib/ssot";
 
 const VACCINE_FILE = "_knowledge/02.医疗健康/Synthetic Member 02/疫苗接种计划.md";

@@ -1,29 +1,27 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { aiStreamChat } from "@/lib/ai";
+import { statePath } from "@/lib/paths";
 
 export async function GET() {
   try {
-    const cwd = process.cwd();
-
     let timeline: { date: string; event: string; type: string }[] = [];
     let healthSummary = "";
     let growthInfo = "";
     let recentTitles: string[] = [];
 
     try {
-      const raw = await readFile(path.join(cwd, "app-data", "timeline.json"), "utf8");
+      const raw = await readFile(statePath("generated", "timeline.json"), "utf8");
       timeline = JSON.parse(raw);
     } catch {}
 
     try {
-      const raw = await readFile(path.join(cwd, "app-data", "health.json"), "utf8");
+      const raw = await readFile(statePath("generated", "health.json"), "utf8");
       const data = JSON.parse(raw);
       healthSummary = (data.healthSections?.overviewSummary || "").slice(0, 300);
     } catch {}
 
     try {
-      const raw = await readFile(path.join(cwd, "app-data", "growth.json"), "utf8");
+      const raw = await readFile(statePath("generated", "growth.json"), "utf8");
       const data = JSON.parse(raw);
       const gs = data.growthSections || {};
       growthInfo = [
@@ -34,7 +32,7 @@ export async function GET() {
     } catch {}
 
     try {
-      const raw = await readFile(path.join(cwd, "app-data", "summary.json"), "utf8");
+      const raw = await readFile(statePath("generated", "summary.json"), "utf8");
       const data = JSON.parse(raw);
       recentTitles = (data.recentUpdates || []).map((d: { title: string }) => d.title).slice(0, 5);
     } catch {}
