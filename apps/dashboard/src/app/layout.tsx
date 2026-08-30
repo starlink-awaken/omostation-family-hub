@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import Script from "next/script";
 import { checkEnv } from "@/lib/env-check";
 import "./globals.css";
+import "@/styles/tailwind.generated.css";
 
 checkEnv();
 
@@ -44,7 +45,6 @@ export default function RootLayout({
       <Script id="sw-register" strategy="afterInteractive">
         {`if('serviceWorker'in navigator){navigator.serviceWorker.register('/sw.js')}`}
       </Script>
-      <link rel="stylesheet" href="/tailwind.css" />
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
         {children}
       </body>

@@ -5,18 +5,15 @@ export default defineConfig({
   timeout: 30000,
   retries: 0,
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: "http://127.0.0.1:3000",
     headless: true,
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: "bun run dev",
+    command: "node scripts/run-e2e-server.mjs",
     port: 3000,
-    reuseExistingServer: true,
-    timeout: 30000,
-    env: {
-      FAMILY_DASHBOARD_PASSWORD: "family2026",
-    },
+    reuseExistingServer: false,
+    timeout: 120000,
   },
   projects: [
     { name: "setup", testMatch: /auth\.setup\.ts/ },

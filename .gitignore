@@ -49,6 +49,7 @@ apps/dashboard/*.tsbuildinfo
 apps/dashboard/.env*
 !apps/dashboard/.env.example
 apps/dashboard/public/tailwind.css
+apps/dashboard/src/styles/tailwind.generated.css
 
 # Auto-generated bump workflow
 .github/workflows/bump-main-pr.yml

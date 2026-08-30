@@ -18,6 +18,7 @@
 /out/
 /app-data/
 /e2e/.auth.json
+/src/styles/tailwind.generated.css
 
 # production
 /build
