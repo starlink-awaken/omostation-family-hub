@@ -3,6 +3,7 @@
     "forbidden_name": 11,
     "runtime_or_private": 38808
   },
+  "expected_target_fingerprint": "b750dbf7403934d9b215b81d476d74e1f71b2c554f59a53530ef03f797daf2d4",
   "files": [
     {
       "mode": 420,
@@ -1661,8 +1662,16 @@
       "transform": "private-token-substitution/v1"
     }
   ],
-  "schema": "family-dashboard-import-plan/v1",
+  "schema": "family-dashboard-import-plan/v2",
   "selected_bytes": 865326,
   "selected_count": 265,
-  "selected_fingerprint": "e6224315fe799d5a53dcdeecaf90292096a73202e1aa5d8a7452ec79ac178259"
+  "selected_fingerprint": "e6224315fe799d5a53dcdeecaf90292096a73202e1aa5d8a7452ec79ac178259",
+  "source_root_identity": {
+    "path_digest": "995c9f0d9aca1cc93e3cac612116086c69d42aa93670699fc95a46e46f47479b",
+    "ref": "documents://family-dashboard-app"
+  },
+  "target_root_identity": {
+    "path_digest": "561dac4f6ea0a5d4302c3fbb3959f55a2b19a54a5e2f2c205a77784edaaae491",
+    "ref": "repo://family-hub/apps/dashboard"
+  }
 }
