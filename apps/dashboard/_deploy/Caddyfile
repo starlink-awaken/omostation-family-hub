@@ -1,0 +1,28 @@
+# 生产部署 Caddyfile
+# 将 example.com 替换为实际域名
+# 如果仅内网使用，注释掉全局 TLS 或使用 local_certs
+
+your-domain.com {
+    # 自动 HTTPS（Caddy 自动申请 Let's Encrypt 证书）
+    # 内网环境替换为：tls internal
+
+    # 反代 Next.js 应用
+    reverse_proxy app:3000 {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # 安全头
+    header / {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    # 日志
+    log {
+        output file /var/log/caddy/access.log
+    }
+}

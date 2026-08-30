@@ -17,11 +17,13 @@
 - **Frontend dev**: `bun run dev` Vite
 - **HTTP API**: `bun run api` :3001
 - **MCP stdio**: `uv run python mcp_server.py` 
+- **Dashboard source owner**: `apps/dashboard` (Phase A source ownership; no Cockpit/live cutover)
 
 ## 2. 上游依赖
 
 - gbrain (L2)
 - aetherforge-gateway (aetherforge/packages/gateway/)
+- Household Documents through explicit read-only `FAMILY_DOCUMENTS_ROOT`
 
 ## 3. 下游影响
 
@@ -32,6 +34,8 @@
 - 项目源码：`projects/family-hub/`
 - 入口定义：`projects/family-hub/pyproject.toml` 或 `package.json`
 - 测试：`cd projects/family-hub && bun run build && uv run python -m unittest discover -s tests -q`
+- Dashboard generated data/cache/audit state: explicit `FAMILY_DASHBOARD_STATE_ROOT` outside Git and Documents
+- Direct Documents writes: disabled pending OMO proposal/approval
 
 ## 架构演进与项目边界索引
 

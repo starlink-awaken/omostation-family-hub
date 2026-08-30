@@ -26,8 +26,9 @@
 | 积分与等级 | 完成任务获得积分，累计升级 |
 | 随机盲盒奖励 | 任务完成后触发惊喜奖励动画 |
 | 每周成长报告 | 统计任务完成情况，AI 导师生成鼓励报告 |
+| 家庭驾驶舱源码 owner | `apps/dashboard` 持有 Next.js 页面/API/搜索/健康/成长/资产等源码；当前仅完成源码 owner 与合成验证 |
 
-> 说明：当前版本聚焦家庭任务 gamification 核心闭环，家庭管理、日程、健康、财务等模块处于规划/未来扩展阶段。
+> 说明：家庭管理、日程、健康、财务等 dashboard 源码已归入本仓，但 live runtime、Cockpit 切换和旧应用退役仍需后续阶段证明。
 
 ---
 
@@ -37,6 +38,7 @@
 - Express 5 + `bun:sqlite`（HTTP API）
 - Python 3.13 + FastMCP（MCP 服务）
 - Bun 运行时
+- Next.js 16（`apps/dashboard` 独立 nested package）
 
 ---
 

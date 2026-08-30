@@ -37,5 +37,19 @@ coverage/
 .omc/
 *.tmp
 
+# Family dashboard nested application runtime/build products
+apps/dashboard/node_modules/
+apps/dashboard/.next/
+apps/dashboard/out/
+apps/dashboard/app-data/
+apps/dashboard/.local-audit/
+apps/dashboard/test-results/
+apps/dashboard/e2e/.auth.json
+apps/dashboard/*.tsbuildinfo
+apps/dashboard/.env*
+!apps/dashboard/.env.example
+apps/dashboard/public/tailwind.css
+apps/dashboard/src/styles/tailwind.generated.css
+
 # Auto-generated bump workflow
 .github/workflows/bump-main-pr.yml
