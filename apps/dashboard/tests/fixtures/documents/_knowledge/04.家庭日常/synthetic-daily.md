@@ -6,4 +6,3 @@ tags: [synthetic]
 # Synthetic Daily
 
 - [ ] Validate the dashboard fixture.
-

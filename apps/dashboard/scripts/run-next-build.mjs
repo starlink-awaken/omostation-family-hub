@@ -57,4 +57,3 @@ if (isMain) {
     rmSync(stateRoot, { recursive: true, force: true });
   }
 }
-

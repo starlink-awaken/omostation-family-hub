@@ -6,4 +6,3 @@ tags: [synthetic]
 # Synthetic Health
 
 No real medical information is present.
-
