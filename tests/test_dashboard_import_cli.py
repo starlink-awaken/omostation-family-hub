@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import stat
 from pathlib import Path
@@ -98,6 +99,19 @@ def test_cli_plan_apply_and_verify_round_trip(tmp_path: Path, capsys) -> None:
     assert apply_output["status"] == "completed"
     assert target_receipt.is_file()
     assert "Private Person" not in (target / "src" / "member.ts").read_text(encoding="utf-8")
+    source_payload = json.loads(source_receipt.read_text(encoding="utf-8"))
+    target_payload = json.loads(target_receipt.read_text(encoding="utf-8"))
+    assert source_payload["schema"] == "family-dashboard-import-plan/v2"
+    assert target_payload["schema"] == "family-dashboard-import-target/v2"
+    assert source_payload["source_root_identity"]["ref"] == "documents://family-dashboard-app"
+    assert source_payload["target_root_identity"]["ref"] == "repo://family-hub/apps/dashboard"
+    assert target_payload["source_receipt_digest"] == hashlib.sha256(source_receipt.read_bytes()).hexdigest()
+    assert target_payload["source_root_identity"] == source_payload["source_root_identity"]
+    assert target_payload["target_root_identity"] == source_payload["target_root_identity"]
+    assert target_payload["verification_mode"] == "exact-import"
+    assert target_payload["excluded_source_drift"] is False
+    assert target_payload["observed_target_fingerprint"] == source_payload["expected_target_fingerprint"]
+    assert str(tmp_path) not in json.dumps(target_payload, sort_keys=True)
 
     assert (
         main(

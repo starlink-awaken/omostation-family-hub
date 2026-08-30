@@ -17,9 +17,12 @@ from typing import Any
 
 import yaml
 
-SCHEMA = "family-dashboard-import-plan/v1"
-TARGET_SCHEMA = "family-dashboard-import-target/v1"
+SCHEMA = "family-dashboard-import-plan/v2"
+TARGET_SCHEMA = "family-dashboard-import-target/v2"
 SANITIZE_TRANSFORM = "private-token-substitution/v1"
+DEFAULT_SOURCE_ROOT_REF = "documents://family-dashboard-app"
+DEFAULT_TARGET_ROOT_REF = "repo://family-hub/apps/dashboard"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 ALLOWED_ROOTS = frozenset({"src", "scripts", "public", "e2e", "_deploy"})
 ALLOWED_FILES = frozenset(
@@ -59,6 +62,12 @@ FORBIDDEN_PARTS = frozenset(
 FORBIDDEN_NAMES = frozenset({".DS_Store", ".auth.json", ".env.local", "tsconfig.tsbuildinfo"})
 FORBIDDEN_ROOT_FILES = frozenset({"AGENTS.md", "CLAUDE.md", "next-env.d.ts"})
 FORBIDDEN_RELATIVE_PATHS = frozenset({"public/tailwind.css"})
+ADAPTED_TARGET_EVIDENCE_PATHS = frozenset(
+    {
+        "migration/source-receipt.json",
+        "migration/target-receipt.json",
+    }
+)
 
 
 class ImportClosedError(RuntimeError):
@@ -103,8 +112,19 @@ class SanitizedRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class RootIdentity:
+    ref: str
+    path_digest: str
+
+    def to_public_dict(self) -> dict[str, str]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
 class ImportPlan:
     schema: str
+    source_root_identity: RootIdentity
+    target_root_identity: RootIdentity
     files: tuple[FileRecord, ...]
     sanitized_files: tuple[SanitizedRecord, ...]
     selected_count: int
@@ -115,10 +135,13 @@ class ImportPlan:
     full_source_fingerprint: str
     excluded_counts: dict[str, int]
     redaction_map_digest: str
+    expected_target_fingerprint: str
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
             "schema": self.schema,
+            "source_root_identity": self.source_root_identity.to_public_dict(),
+            "target_root_identity": self.target_root_identity.to_public_dict(),
             "files": [record.to_public_dict() for record in self.files],
             "sanitized_files": [record.to_public_dict() for record in self.sanitized_files],
             "selected_count": self.selected_count,
@@ -129,6 +152,7 @@ class ImportPlan:
             "full_source_fingerprint": self.full_source_fingerprint,
             "excluded_counts": dict(sorted(self.excluded_counts.items())),
             "redaction_map_digest": self.redaction_map_digest,
+            "expected_target_fingerprint": self.expected_target_fingerprint,
         }
 
 
@@ -144,6 +168,7 @@ class VerificationResult:
     selected_count: int
     selected_fingerprint: str
     full_source_fingerprint: str
+    observed_target_fingerprint: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +179,7 @@ class AdaptedVerificationResult:
     full_source_fingerprint: str
     verification_mode: str
     excluded_source_drift: bool
+    observed_target_fingerprint: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,6 +209,66 @@ def _canonical_fingerprint(records: Iterable[dict[str, Any]]) -> str:
     ordered = sorted(records, key=lambda item: str(item["relative_path"]))
     encoded = json.dumps(ordered, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return _digest_bytes(encoded)
+
+
+def _root_identity(path: Path, ref: str, *, owner_root: Path | None = None) -> RootIdentity:
+    if not ref:
+        raise ImportClosedError("root identity ref must be non-empty")
+    canonical = path.resolve(strict=False)
+    if owner_root is None:
+        identity_material = str(canonical)
+    else:
+        try:
+            relative = canonical.relative_to(owner_root.resolve(strict=False))
+        except ValueError as exc:
+            raise ImportClosedError("target root is outside owner root") from exc
+        identity_material = relative.as_posix()
+    return RootIdentity(ref=ref, path_digest=_digest_bytes(identity_material.encode("utf-8")))
+
+
+def _effective_target_owner_root(target: Path, target_owner_root: Path | None) -> Path:
+    if target_owner_root is not None:
+        return target_owner_root
+    try:
+        relative = target.resolve(strict=False).relative_to(PROJECT_ROOT.resolve(strict=False))
+    except ValueError:
+        return target.parent
+    if relative != Path("apps/dashboard"):
+        raise ImportClosedError("target root must be family-hub/apps/dashboard")
+    return PROJECT_ROOT
+
+
+def _expected_target_fingerprint(
+    files: Iterable[FileRecord],
+    sanitized_files: Iterable[SanitizedRecord],
+) -> str:
+    records = [record.to_public_dict() for record in files]
+    records.extend(
+        {
+            "relative_path": record.relative_path,
+            "mode": record.mode,
+            "size": record.target_size,
+            "sha256": record.target_sha256,
+        }
+        for record in sanitized_files
+    )
+    return _canonical_fingerprint(records)
+
+
+def _assert_root_identities(
+    plan: ImportPlan,
+    source: Path,
+    target: Path,
+    *,
+    source_root_ref: str,
+    target_root_ref: str,
+    target_owner_root: Path | None,
+) -> None:
+    if _root_identity(source, source_root_ref) != plan.source_root_identity:
+        raise ImportClosedError("source root identity mismatch")
+    owner_root = _effective_target_owner_root(target, target_owner_root)
+    if _root_identity(target, target_root_ref, owner_root=owner_root) != plan.target_root_identity:
+        raise ImportClosedError("target root identity mismatch")
 
 
 def _record(path: Path, relative_path: str) -> FileRecord:
@@ -324,8 +410,10 @@ def plan_import(
     *,
     replacements: dict[str, str],
     required_private_tokens: tuple[str, ...] | None = None,
+    source_root_ref: str = DEFAULT_SOURCE_ROOT_REF,
+    target_root_ref: str = DEFAULT_TARGET_ROOT_REF,
+    target_owner_root: Path | None = None,
 ) -> ImportPlan:
-    del target  # Target absence/collision is checked by apply; planning is read-only.
     full_records = _iter_source_nodes(source)
     exact_files: list[FileRecord] = []
     sanitized_files: list[SanitizedRecord] = []
@@ -365,8 +453,12 @@ def plan_import(
 
     public_selected = [record.to_public_dict() for record in exact_files]
     public_selected.extend(record.to_public_dict() for record in sanitized_files)
+    expected_target_fingerprint = _expected_target_fingerprint(exact_files, sanitized_files)
+    owner_root = _effective_target_owner_root(target, target_owner_root)
     return ImportPlan(
         schema=SCHEMA,
+        source_root_identity=_root_identity(source, source_root_ref),
+        target_root_identity=_root_identity(target, target_root_ref, owner_root=owner_root),
         files=tuple(exact_files),
         sanitized_files=tuple(sanitized_files),
         selected_count=len(exact_files) + len(sanitized_files),
@@ -378,6 +470,7 @@ def plan_import(
         full_source_fingerprint=_canonical_fingerprint(record.to_public_dict() for record in full_records),
         excluded_counts=dict(sorted(excluded_counts.items())),
         redaction_map_digest=_mapping_digest(replacements),
+        expected_target_fingerprint=expected_target_fingerprint,
     )
 
 
@@ -405,7 +498,18 @@ def apply_import(
     target: Path,
     *,
     replacements: dict[str, str],
+    source_root_ref: str = DEFAULT_SOURCE_ROOT_REF,
+    target_root_ref: str = DEFAULT_TARGET_ROOT_REF,
+    target_owner_root: Path | None = None,
 ) -> ApplyResult:
+    _assert_root_identities(
+        plan,
+        source,
+        target,
+        source_root_ref=source_root_ref,
+        target_root_ref=target_root_ref,
+        target_owner_root=target_owner_root,
+    )
     if target.exists():
         raise ImportClosedError("destination collision")
     _assert_source_unchanged(plan, source)
@@ -457,7 +561,18 @@ def verify_import(
     target: Path,
     *,
     replacements: dict[str, str],
+    source_root_ref: str = DEFAULT_SOURCE_ROOT_REF,
+    target_root_ref: str = DEFAULT_TARGET_ROOT_REF,
+    target_owner_root: Path | None = None,
 ) -> VerificationResult:
+    _assert_root_identities(
+        plan,
+        source,
+        target,
+        source_root_ref=source_root_ref,
+        target_root_ref=target_root_ref,
+        target_owner_root=target_owner_root,
+    )
     _assert_source_unchanged(plan, source)
     if _mapping_digest(replacements) != plan.redaction_map_digest:
         raise ImportClosedError("redaction map drift")
@@ -482,11 +597,15 @@ def verify_import(
             or target_record.sha256 != expected.target_sha256
         ):
             raise ImportClosedError(f"sanitized target drift: {expected.relative_path}")
+    observed_target_fingerprint = _canonical_fingerprint(record.to_public_dict() for record in actual_records)
+    if observed_target_fingerprint != plan.expected_target_fingerprint:
+        raise ImportClosedError("observed target fingerprint mismatch")
     return VerificationResult(
         ok=True,
         selected_count=plan.selected_count,
         selected_fingerprint=plan.selected_fingerprint,
         full_source_fingerprint=plan.full_source_fingerprint,
+        observed_target_fingerprint=observed_target_fingerprint,
     )
 
 
@@ -523,6 +642,8 @@ def _iter_adapted_target_files(root: Path) -> tuple[FileRecord, ...]:
         for filename in sorted(filenames):
             file_path = current_path / filename
             relative = PurePosixPath(file_path.relative_to(root).as_posix())
+            if relative.as_posix() in ADAPTED_TARGET_EVIDENCE_PATHS:
+                continue
             if _forbidden_category(relative) is not None:
                 continue
             records.append(_record(file_path, relative.as_posix()))
@@ -535,7 +656,18 @@ def verify_adapted_import(
     target: Path,
     *,
     replacements: dict[str, str],
+    source_root_ref: str = DEFAULT_SOURCE_ROOT_REF,
+    target_root_ref: str = DEFAULT_TARGET_ROOT_REF,
+    target_owner_root: Path | None = None,
 ) -> AdaptedVerificationResult:
+    _assert_root_identities(
+        plan,
+        source,
+        target,
+        source_root_ref=source_root_ref,
+        target_root_ref=target_root_ref,
+        target_owner_root=target_owner_root,
+    )
     if _mapping_digest(replacements) != plan.redaction_map_digest:
         raise ImportClosedError("redaction map drift")
     _assert_selected_source_unchanged(plan, source)
@@ -558,6 +690,7 @@ def verify_adapted_import(
         or sum(record.size for record in current_source) != plan.full_source_bytes
         or current_fingerprint != plan.full_source_fingerprint
     )
+    observed_target_fingerprint = _canonical_fingerprint(record.to_public_dict() for record in actual_records)
     return AdaptedVerificationResult(
         ok=True,
         selected_count=plan.selected_count,
@@ -565,6 +698,7 @@ def verify_adapted_import(
         full_source_fingerprint=current_fingerprint,
         verification_mode="adapted-target",
         excluded_source_drift=excluded_drift,
+        observed_target_fingerprint=observed_target_fingerprint,
     )
 
 
@@ -584,6 +718,8 @@ def _read_plan(path: Path) -> ImportPlan:
     try:
         return ImportPlan(
             schema=payload["schema"],
+            source_root_identity=RootIdentity(**payload["source_root_identity"]),
+            target_root_identity=RootIdentity(**payload["target_root_identity"]),
             files=tuple(FileRecord(**record) for record in payload["files"]),
             sanitized_files=tuple(SanitizedRecord(**record) for record in payload["sanitized_files"]),
             selected_count=int(payload["selected_count"]),
@@ -594,6 +730,7 @@ def _read_plan(path: Path) -> ImportPlan:
             full_source_fingerprint=str(payload["full_source_fingerprint"]),
             excluded_counts={str(key): int(value) for key, value in payload["excluded_counts"].items()},
             redaction_map_digest=str(payload["redaction_map_digest"]),
+            expected_target_fingerprint=str(payload["expected_target_fingerprint"]),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise ImportClosedError("source receipt is malformed") from exc
@@ -627,23 +764,78 @@ def _read_private_mapping(path: Path) -> dict[str, str]:
     return replacements
 
 
-def _write_target_receipt(plan: ImportPlan, output: Path) -> None:
-    output.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
+def _target_receipt_payload(
+    plan: ImportPlan,
+    *,
+    source_receipt_digest: str,
+    observed_target_fingerprint: str,
+    verification_mode: str,
+    excluded_source_drift: bool,
+) -> dict[str, Any]:
+    return {
         "schema": TARGET_SCHEMA,
         "status": "completed",
-        "plan": plan.to_public_dict(),
+        "source_receipt_digest": source_receipt_digest,
+        "source_root_identity": plan.source_root_identity.to_public_dict(),
+        "target_root_identity": plan.target_root_identity.to_public_dict(),
+        "selected_count": plan.selected_count,
+        "expected_target_fingerprint": plan.expected_target_fingerprint,
+        "observed_target_fingerprint": observed_target_fingerprint,
+        "verification_mode": verification_mode,
+        "excluded_source_drift": excluded_source_drift,
     }
+
+
+def _write_target_receipt(
+    plan: ImportPlan,
+    output: Path,
+    *,
+    source_receipt_digest: str,
+    observed_target_fingerprint: str,
+    verification_mode: str = "exact-import",
+    excluded_source_drift: bool = False,
+) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    payload = _target_receipt_payload(
+        plan,
+        source_receipt_digest=source_receipt_digest,
+        observed_target_fingerprint=observed_target_fingerprint,
+        verification_mode=verification_mode,
+        excluded_source_drift=excluded_source_drift,
+    )
     encoded = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     with output.open("x", encoding="utf-8") as handle:
         handle.write(encoded)
 
 
-def _verify_target_receipt(plan: ImportPlan, path: Path) -> None:
+def _verify_target_receipt(
+    plan: ImportPlan,
+    path: Path,
+    *,
+    source_receipt_digest: str,
+    observed_target_fingerprint: str,
+    excluded_source_drift: bool = False,
+) -> None:
     if not path.is_file() or path.is_symlink():
         raise ImportClosedError("target receipt must be a regular file")
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload != {"schema": TARGET_SCHEMA, "status": "completed", "plan": plan.to_public_dict()}:
+    mode = payload.get("verification_mode")
+    if mode == "exact-import":
+        expected_observed = plan.expected_target_fingerprint
+        expected_drift = False
+    elif mode == "adapted-target":
+        expected_observed = observed_target_fingerprint
+        expected_drift = excluded_source_drift
+    else:
+        raise ImportClosedError("target receipt verification mode mismatch")
+    expected = _target_receipt_payload(
+        plan,
+        source_receipt_digest=source_receipt_digest,
+        observed_target_fingerprint=expected_observed,
+        verification_mode=mode,
+        excluded_source_drift=expected_drift,
+    )
+    if payload != expected:
         raise ImportClosedError("target receipt mismatch")
 
 
@@ -671,6 +863,8 @@ def _parser() -> argparse.ArgumentParser:
         subparser.add_argument("--target", type=Path, required=True)
         subparser.add_argument("--redaction-map", type=Path, required=True)
         subparser.add_argument("--source-receipt", type=Path, required=True)
+        subparser.add_argument("--source-root-ref", default=DEFAULT_SOURCE_ROOT_REF)
+        subparser.add_argument("--target-root-ref", default=DEFAULT_TARGET_ROOT_REF)
         subparser.add_argument("--json", action="store_true")
         if command in {"apply", "verify"}:
             subparser.add_argument("--target-receipt", type=Path, required=True)
@@ -689,23 +883,68 @@ def main(argv: list[str] | None = None) -> int:
 
     replacements = _read_private_mapping(args.redaction_map)
     if args.command == "plan":
-        plan = plan_import(args.source, args.target, replacements=replacements)
+        plan = plan_import(
+            args.source,
+            args.target,
+            replacements=replacements,
+            source_root_ref=args.source_root_ref,
+            target_root_ref=args.target_root_ref,
+        )
         write_receipt(plan, args.source_receipt)
         print(json.dumps(_public_status("planned", plan), sort_keys=True))
         return 0
 
     plan = _read_plan(args.source_receipt)
     if args.command == "apply":
-        fresh = plan_import(args.source, args.target, replacements=replacements)
+        fresh = plan_import(
+            args.source,
+            args.target,
+            replacements=replacements,
+            source_root_ref=args.source_root_ref,
+            target_root_ref=args.target_root_ref,
+        )
         if fresh != plan:
             raise ImportClosedError("source plan drift")
-        apply_import(plan, args.source, args.target, replacements=replacements)
-        _write_target_receipt(plan, args.target_receipt)
+        apply_import(
+            plan,
+            args.source,
+            args.target,
+            replacements=replacements,
+            source_root_ref=args.source_root_ref,
+            target_root_ref=args.target_root_ref,
+        )
+        verified = verify_import(
+            plan,
+            args.source,
+            args.target,
+            replacements=replacements,
+            source_root_ref=args.source_root_ref,
+            target_root_ref=args.target_root_ref,
+        )
+        _write_target_receipt(
+            plan,
+            args.target_receipt,
+            source_receipt_digest=_digest_file(args.source_receipt),
+            observed_target_fingerprint=verified.observed_target_fingerprint,
+        )
         print(json.dumps(_public_status("completed", plan), sort_keys=True))
         return 0
-    _verify_target_receipt(plan, args.target_receipt)
     if args.allow_adapted_target:
-        adapted = verify_adapted_import(plan, args.source, args.target, replacements=replacements)
+        adapted = verify_adapted_import(
+            plan,
+            args.source,
+            args.target,
+            replacements=replacements,
+            source_root_ref=args.source_root_ref,
+            target_root_ref=args.target_root_ref,
+        )
+        _verify_target_receipt(
+            plan,
+            args.target_receipt,
+            source_receipt_digest=_digest_file(args.source_receipt),
+            observed_target_fingerprint=adapted.observed_target_fingerprint,
+            excluded_source_drift=adapted.excluded_source_drift,
+        )
         print(
             json.dumps(
                 {
@@ -720,10 +959,29 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 0
-    fresh = plan_import(args.source, args.target, replacements=replacements)
+    fresh = plan_import(
+        args.source,
+        args.target,
+        replacements=replacements,
+        source_root_ref=args.source_root_ref,
+        target_root_ref=args.target_root_ref,
+    )
     if fresh != plan:
         raise ImportClosedError("source plan drift")
-    result = verify_import(plan, args.source, args.target, replacements=replacements)
+    result = verify_import(
+        plan,
+        args.source,
+        args.target,
+        replacements=replacements,
+        source_root_ref=args.source_root_ref,
+        target_root_ref=args.target_root_ref,
+    )
+    _verify_target_receipt(
+        plan,
+        args.target_receipt,
+        source_receipt_digest=_digest_file(args.source_receipt),
+        observed_target_fingerprint=result.observed_target_fingerprint,
+    )
     print(
         json.dumps(
             {

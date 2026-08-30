@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
 
 from tools.dashboard_import import (
     ImportClosedError,
+    _iter_adapted_target_files,
     apply_import,
     derive_redaction_map,
     plan_import,
@@ -61,6 +63,98 @@ def test_plan_is_deterministic(tmp_path: Path) -> None:
     assert first == second
     assert len(first.selected_fingerprint) == 64
     assert len(first.full_source_fingerprint) == 64
+
+
+def test_plan_binds_redacted_source_and_target_root_identities(tmp_path: Path) -> None:
+    source = _minimal_source(tmp_path)
+    target = tmp_path / "target"
+
+    plan = plan_import(
+        source,
+        target,
+        replacements={},
+        source_root_ref="documents://family-dashboard-app",
+        target_root_ref="repo://family-hub/apps/dashboard",
+    )
+
+    assert plan.source_root_identity.ref == "documents://family-dashboard-app"
+    assert plan.target_root_identity.ref == "repo://family-hub/apps/dashboard"
+    assert len(plan.source_root_identity.path_digest) == 64
+    assert len(plan.target_root_identity.path_digest) == 64
+    public = json.dumps(plan.to_public_dict(), sort_keys=True)
+    assert str(tmp_path) not in public
+    assert len(plan.expected_target_fingerprint) == 64
+
+
+def test_apply_rejects_byte_identical_wrong_source_and_target_roots(tmp_path: Path) -> None:
+    source = _minimal_source(tmp_path / "approved")
+    target_owner = tmp_path / "approved-target"
+    target = target_owner / "apps" / "dashboard"
+    plan = plan_import(
+        source,
+        target,
+        replacements={},
+        source_root_ref="documents://family-dashboard-app",
+        target_root_ref="repo://family-hub/apps/dashboard",
+        target_owner_root=target_owner,
+    )
+
+    wrong_source = tmp_path / "wrong" / source.name
+    shutil.copytree(source, wrong_source)
+    with pytest.raises(ImportClosedError, match="source root identity mismatch"):
+        apply_import(
+            plan,
+            wrong_source,
+            target,
+            replacements={},
+            source_root_ref="documents://family-dashboard-app",
+            target_root_ref="repo://family-hub/apps/dashboard",
+            target_owner_root=target_owner,
+        )
+
+    wrong_target = tmp_path / "wrong-target" / "apps" / "dashboard"
+    with pytest.raises(ImportClosedError, match="target root"):
+        apply_import(
+            plan,
+            source,
+            wrong_target,
+            replacements={},
+            source_root_ref="documents://family-dashboard-app",
+            target_root_ref="repo://family-hub/apps/dashboard",
+            target_owner_root=target_owner,
+        )
+    assert not wrong_target.exists()
+
+
+def test_target_identity_is_stable_across_clean_clone_roots(tmp_path: Path) -> None:
+    source = _minimal_source(tmp_path)
+    first_owner = tmp_path / "clone-a"
+    second_owner = tmp_path / "clone-b"
+    first = plan_import(
+        source,
+        first_owner / "apps" / "dashboard",
+        replacements={},
+        target_owner_root=first_owner,
+    )
+    second = plan_import(
+        source,
+        second_owner / "apps" / "dashboard",
+        replacements={},
+        target_owner_root=second_owner,
+    )
+
+    assert first.target_root_identity == second.target_root_identity
+
+
+def test_adapted_target_fingerprint_excludes_self_referential_receipts(tmp_path: Path) -> None:
+    target = tmp_path / "apps" / "dashboard"
+    _write(target / "src" / "page.tsx", "export default function Page() {}\n")
+    _write(target / "migration" / "source-receipt.json", '{"schema":"source"}\n')
+    _write(target / "migration" / "target-receipt.json", '{"schema":"target"}\n')
+
+    paths = {record.relative_path for record in _iter_adapted_target_files(target)}
+
+    assert paths == {"src/page.tsx"}
 
 
 def test_plan_rejects_unknown_root_file(tmp_path: Path) -> None:
@@ -158,6 +252,18 @@ def test_apply_copies_exact_files_and_sanitizes_private_text(tmp_path: Path) -> 
     assert verify_import(plan, source, target, replacements=replacements).ok
 
 
+def test_expected_target_fingerprint_is_path_ordered_across_exact_and_sanitized_files(tmp_path: Path) -> None:
+    source = _minimal_source(tmp_path)
+    _write(source / "src" / "a-private.ts", 'export const member = "Private Person";\n')
+    target = tmp_path / "target"
+    replacements = {"Private Person": "Synthetic Member 01"}
+    plan = plan_import(source, target, replacements=replacements)
+
+    apply_import(plan, source, target, replacements=replacements)
+
+    assert verify_import(plan, source, target, replacements=replacements).ok is True
+
+
 def test_apply_rejects_source_drift_before_copy(tmp_path: Path) -> None:
     source = _minimal_source(tmp_path)
     target = tmp_path / "target"
@@ -201,7 +307,7 @@ def test_receipt_contains_hashes_but_not_private_values(tmp_path: Path) -> None:
     write_receipt(plan, receipt_path)
 
     payload = receipt_path.read_text(encoding="utf-8")
-    assert '"schema": "family-dashboard-import-plan/v1"' in payload
+    assert '"schema": "family-dashboard-import-plan/v2"' in payload
     assert "Private Person" not in payload
     assert "Synthetic Member 01" not in payload
     assert plan.redaction_map_digest in payload
