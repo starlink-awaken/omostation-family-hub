@@ -1,0 +1,54 @@
+{
+  "name": "family-dashboard-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "bun run scripts/build-all.ts && (bun run scripts/watch-data.ts & next dev)",
+    "dev:no-watch": "next dev",
+    "dev:full": "bun run build:data && (bun run scripts/watch-data.ts & next dev)",
+    "dev:watch": "bun run scripts/watch-data.ts",
+    "build": "bun run scripts/build-css.mjs && ./node_modules/.bin/next build",
+    "build:full": "bun run build:data && next build",
+    "build:data": "bun run scripts/verify-paths.ts && bun run scripts/build-all.ts",
+    "verify:paths": "bun run scripts/verify-paths.ts",
+    "verify:summary": "bun run scripts/verify-summary.ts",
+    "verify:domain-data": "bun run scripts/verify-domain-data.ts",
+    "verify:data": "bun run verify:summary && bun run verify:domain-data",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "d3-drag": "^3.0.0",
+    "d3-force": "^3.0.0",
+    "d3-selection": "^3.0.0",
+    "d3-zoom": "^3.0.0",
+    "marked": "^18.0.5",
+    "mermaid": "^11.16.0",
+    "next": "16.2.10",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "recharts": "^3.9.1",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.10",
+    "jsdom": "^29.1.1",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "^4.1.9"
+  },
+  "trustedDependencies": [
+    "sharp",
+    "unrs-resolver"
+  ]
+}

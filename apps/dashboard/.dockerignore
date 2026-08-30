@@ -1,0 +1,15 @@
+node_modules/
+.next/
+.git/
+.gitignore
+.env*
+__pycache__
+*.test.ts
+vitest.config.ts
+eslint.config.mjs
+postcss.config.mjs
+app-data/
+test-results/
+e2e/
+README.md
+CRON_SETUP.md
