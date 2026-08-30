@@ -2,7 +2,7 @@
 
 > **Layer**: X 横切框架  
 > **Role**: 家庭数字枢纽 — 家庭任务 gamification  
-> **Stack**: React 19 + Vite + Express 5 + Python FastMCP + SQLite  
+> **Stack**: React 19 + Vite + Next.js 16 + Express 5 + Python FastMCP + SQLite
 > **Health**: See local scenario verification
 > **SSOT**: 运行时健康、场景验证状态以本项目本地验证和 workspace governance SSOT 为准
 >
@@ -15,7 +15,9 @@
 ```mermaid
 
 graph LR
-    UI[React App] --> API[Express :3001]
+    UI[Vite Quest UI] --> API[Express API]
+    DASH[apps/dashboard Next.js] --> DOCS[Explicit read-only Documents root]
+    DASH --> STATE[Explicit Workspace runtime state]
     API --> DB[(family_hub.db)]
     API --> GBR[gbrain]
     MCP[mcp_server.py] --> DB
@@ -28,6 +30,7 @@ graph LR
 | Type | Entry | Port / Notes |
 |:--|:--|:--|
 | Frontend dev | `bun run dev` | Vite |
+| Dashboard source | `apps/dashboard` | Not cut over in Phase A |
 | HTTP API | `bun run api` | :3001 |
 | MCP stdio | `uv run python mcp_server.py` |  |
 
@@ -38,6 +41,7 @@ graph LR
 | `mcp_server.py` | FastMCP server: profiles/quests/rewards |
 | `api/server.ts` | Express API + gbrain sync |
 | `src/App.tsx` | React UI |
+| `apps/dashboard` | Canonical Next.js dashboard source; synthetic build/E2E; direct Documents writes disabled |
 | `test_real_scenario.py` | Scenario test |
 
 ## 4. 测试

@@ -14,6 +14,13 @@
 4. 4. `generate_smart_quests` calls LLM gateway
 5. 5. Completions synced to gbrain via `gbrain/src/cli.ts put`
 
+## Dashboard source-owner path
+
+1. Next.js routes resolve household content only beneath `FAMILY_DOCUMENTS_ROOT`.
+2. Generated JSON, manifests, indexes, caches, and task state resolve beneath `FAMILY_DASHBOARD_STATE_ROOT`.
+3. Direct document-save, backup, vaccine, and milestone mutations fail closed with `DOCUMENTS_WRITE_DISABLED`.
+4. Synthetic fixtures drive unit, build, and E2E checks; Phase A does not activate a live Cockpit contract.
+
 ## Sequence Diagram
 
 ```mermaid
