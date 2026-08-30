@@ -84,8 +84,14 @@ export function TaskBoard() {
   }, []);
 
   useEffect(() => {
-    fetchTasks();
-  }, [fetchTasks]);
+    const controller = new AbortController();
+    fetch("/api/tasks", { signal: controller.signal })
+      .then((response) => response.json() as Promise<{ groups: TaskGroup[] }>)
+      .then((data) => setGroups(data.groups))
+      .catch(() => undefined)
+      .finally(() => setLoading(false));
+    return () => controller.abort();
+  }, []);
 
   const handleToggle = useCallback(async (taskId: string, newDone: boolean) => {
     setGroups((prev) =>

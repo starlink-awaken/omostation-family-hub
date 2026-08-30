@@ -10,6 +10,12 @@ import { ThemeToggle } from "./ThemeToggle";
 import { SearchButton } from "./SearchButton";
 import { MobileMenu } from "./MobileMenu";
 
+function applyTheme(mode: string) {
+  const root = document.documentElement;
+  if (mode === "system") root.removeAttribute("data-theme");
+  else root.setAttribute("data-theme", mode);
+}
+
 export function TopNav() {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -17,19 +23,13 @@ export function TopNav() {
 
   useEffect(() => {
     const stored = localStorage.getItem("family-theme");
-    if (stored && ["system", "dark", "light"].includes(stored)) {
-      setTheme(stored);
-      applyTheme(stored);
-    } else {
-      applyTheme("system");
-    }
+    const initialTheme = stored && ["system", "dark", "light"].includes(stored) ? stored : "system";
+    const frame = requestAnimationFrame(() => {
+      setTheme(initialTheme);
+      applyTheme(initialTheme);
+    });
+    return () => cancelAnimationFrame(frame);
   }, []);
-
-  function applyTheme(mode: string) {
-    const root = document.documentElement;
-    if (mode === "system") root.removeAttribute("data-theme");
-    else root.setAttribute("data-theme", mode);
-  }
 
   function cycleTheme() {
     setTheme((t) => {

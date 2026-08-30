@@ -1,0 +1,12 @@
+weekFocus:
+  - id: synthetic-focus
+    title: Synthetic validation
+    sourcePath: _knowledge/04.家庭日常/synthetic-daily.md
+entries:
+  primary:
+    title: Family members
+    href: /members
+  secondary:
+    - title: Health
+      href: /health
+

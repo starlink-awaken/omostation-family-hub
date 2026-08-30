@@ -55,7 +55,7 @@ async function scanAllMdFiles(root: string): Promise<Set<string>> {
     }
     for (const e of entries) {
       if (e.name.startsWith(".")) continue;
-      const full = path.join(dir, e.name);
+      const full = path.join(/* turbopackIgnore: true */ dir, e.name);
       if (e.isDirectory()) {
         await walk(full);
       } else if (e.isFile() && e.name.endsWith(".md")) {
@@ -64,7 +64,7 @@ async function scanAllMdFiles(root: string): Promise<Set<string>> {
     }
   }
   for (const dir of SCAN_DIRS) {
-    const full = path.join(root, dir);
+    const full = path.join(/* turbopackIgnore: true */ root, dir);
     try {
       await readdir(full);
       await walk(full);
@@ -89,10 +89,10 @@ function resolveBrokenLink(href: string, root: string): string | null {
   const norm = normalizeLinkPath(href);
   if (!norm) return null;
   const candidates = [
-    path.resolve(root, norm),
-    path.resolve(root, "_knowledge", norm),
-    path.resolve(root, "_control", norm),
-    path.resolve(root, "_archive", norm),
+    path.resolve(/* turbopackIgnore: true */ root, norm),
+    path.resolve(/* turbopackIgnore: true */ root, "_knowledge", norm),
+    path.resolve(/* turbopackIgnore: true */ root, "_control", norm),
+    path.resolve(/* turbopackIgnore: true */ root, "_archive", norm),
   ];
   for (const c of candidates) {
     if (_knownMdFiles?.has(c)) return null;

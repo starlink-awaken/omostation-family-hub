@@ -1,0 +1,7 @@
+title: Synthetic health
+description: Fictional health records
+items:
+  - id: synthetic-health
+    title: Synthetic Health
+    sourcePath: _knowledge/02.医疗健康/synthetic-health.md
+
