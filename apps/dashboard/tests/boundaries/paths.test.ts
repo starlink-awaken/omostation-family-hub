@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -65,4 +65,13 @@ test("rejects state symlink escape", () => {
   vi.stubEnv("FAMILY_DASHBOARD_STATE_ROOT", state);
 
   expect(() => statePath("cache", "outside.txt")).toThrow("state path crosses a symlink");
+});
+
+test("does not publish synthetic placeholder document links", () => {
+  const source = readFileSync(
+    path.join(process.cwd(), "src/lib/person-registry.ts"),
+    "utf8",
+  );
+
+  expect(source).not.toMatch(/\/doc\?path=[^"\n]*Synthetic/);
 });
