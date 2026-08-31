@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -28,13 +28,78 @@ test("Documents write policy is unconditionally disabled in Phase A", async () =
   });
 });
 
-test("file save and backup reject before authentication or payload parsing", async () => {
+test("file save stages private payload and returns pending proposal", async () => {
+  const documentsRoot = await mkdtemp(path.join(os.tmpdir(), "family-documents-"));
+  const stateRoot = await mkdtemp(path.join(os.tmpdir(), "family-state-"));
+  const target = path.join(documentsRoot, "_knowledge", "note.md");
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, "old\n");
+  vi.stubEnv("FAMILY_DOCUMENTS_ROOT", documentsRoot);
+  vi.stubEnv("FAMILY_DASHBOARD_STATE_ROOT", stateRoot);
+  vi.stubEnv("COCKPIT_INTERNAL_URL", "http://cockpit.internal");
+  vi.stubEnv("FAMILY_HITL_COCKPIT_API_KEY", "test-key");
+  vi.stubEnv("FAMILY_CSRF_TOKEN", "csrf");
+  let submitted: Record<string, unknown> | undefined;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_url, init) => {
+      submitted = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({ status: "pending", proposal_id: submitted.id }), { status: 202 });
+    }),
+  );
+
+  const response = await saveFile(
+    new Request("http://localhost/api/file/save", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-family-dashboard-csrf": "csrf" },
+      body: JSON.stringify({ path: "_knowledge/note.md", content: "new\n" }),
+    }),
+  );
+  expect(response.status).toBe(202);
+  await expect(response.json()).resolves.toMatchObject({
+    status: "pending",
+    code: "DOCUMENTS_WRITE_PENDING_APPROVAL",
+  });
+  expect(String(submitted?.id)).toMatch(/^family-write-/u);
+  expect(submitted).not.toHaveProperty("content");
+  expect(await readFile(target, "utf8")).toBe("old\n");
+});
+
+test("Cockpit rejection removes newly staged payload and preserves Documents", async () => {
+  const documentsRoot = await mkdtemp(path.join(os.tmpdir(), "family-documents-"));
+  const stateRoot = await mkdtemp(path.join(os.tmpdir(), "family-state-"));
+  const target = path.join(documentsRoot, "_knowledge", "note.md");
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, "old\n");
+  vi.stubEnv("FAMILY_DOCUMENTS_ROOT", documentsRoot);
+  vi.stubEnv("FAMILY_DASHBOARD_STATE_ROOT", stateRoot);
+  vi.stubEnv("COCKPIT_INTERNAL_URL", "http://cockpit.internal");
+  vi.stubEnv("FAMILY_HITL_COCKPIT_API_KEY", "test-key");
+  vi.stubEnv("FAMILY_CSRF_TOKEN", "csrf");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify({ status: "error" }), { status: 503 })),
+  );
+
+  const response = await saveFile(
+    new Request("http://localhost/api/file/save", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-family-dashboard-csrf": "csrf" },
+      body: JSON.stringify({ path: "_knowledge/note.md", content: "new\n" }),
+    }),
+  );
+  expect(response.status).toBe(409);
+  expect(await readdir(path.join(stateRoot, "proposals"))).toEqual([]);
+  expect(await readFile(target, "utf8")).toBe("old\n");
+});
+
+test("file save requires CSRF while legacy backup remains disabled", async () => {
   const saveResponse = await saveFile(new Request("http://localhost/api/file/save", { method: "POST" }));
   const backupResponse = await backupDocuments(new Request("http://localhost/api/cron/ssot-backup"));
 
   expect(saveResponse.status).toBe(403);
   expect(backupResponse.status).toBe(403);
-  await expect(saveResponse.json()).resolves.toMatchObject({ code: "DOCUMENTS_WRITE_DISABLED" });
+  await expect(saveResponse.json()).resolves.toEqual({ error: "缺少 CSRF 校验" });
   await expect(backupResponse.json()).resolves.toMatchObject({ code: "DOCUMENTS_WRITE_DISABLED" });
 });
 
