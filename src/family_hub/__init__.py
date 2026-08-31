@@ -1,5 +1,3 @@
-"""Family Hub backend package."""
-
-__all__ = ["__version__"]
+"""family-hub: 家庭数字枢纽 — runtime state + HITL mutations"""
 
 __version__ = "0.1.0"
