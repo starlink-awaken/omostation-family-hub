@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { loadDomainManifest } from "../../src/lib/manifest";
 import { extractSummaryFromMarkdown } from "../../src/lib/extract";
 import type { HealthSectionData, HealthMemberCard, HealthArchiveEntry, HealthHeatmapItem, HealthPriorityCard, HealthSignalItem, HealthStableItem, HealthTimelineEntry, HealthNoteEntry, HealthFooter } from "../../src/types/health";
@@ -6,7 +8,7 @@ import type { MembersSectionData } from "../../src/types/members";
 import type { GrowthSectionData } from "../../src/types/growth";
 import type { DailySectionData } from "../../src/types/daily";
 import type { AssetsSectionData } from "../../src/types/assets";
-import { readSsotFile, loadRawYaml, encodeDocHref, extractMemberName, getAvatarChar, getTagline, getMemberStatus } from "./common";
+import { findUniqueSsotPath, readSsotFile, loadRawYaml, encodeDocHref, extractMemberName, getAvatarChar, getTagline, getMemberStatus } from "./common";
 
 // --- Health section builders ---
 
@@ -309,7 +311,9 @@ export async function buildGrowthSections(): Promise<GrowthSectionData> {
 
   let measurements: GrowthRecord[] = [];
   try {
-    const growthRaw = await readSsotFile("_knowledge/02.医疗健康/Synthetic Member 02/医疗汇总.md");
+    const vaccinePath = await findUniqueSsotPath("/疫苗接种计划.md");
+    const growthPath = path.posix.join(path.posix.dirname(vaccinePath), "医疗汇总.md");
+    const growthRaw = await readSsotFile(growthPath);
     measurements = parseGrowthMeasurements(growthRaw);
   } catch {}
 

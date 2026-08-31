@@ -1,4 +1,4 @@
-import { readSsotFile } from "./common";
+import { readSsotFile, readUniqueSsotFile } from "./common";
 import { parseCalendarContent } from "../../src/lib/parsers/calendar-parser";
 import { parseFinance, parseBudgetRules } from "../../src/lib/parsers/finance-parser";
 import { extractAllTasks } from "../../src/lib/task-extractor";
@@ -51,7 +51,7 @@ export async function buildTasks() {
 
 export async function buildMilestones() {
   try {
-    const raw = await readSsotFile("_knowledge/03.育儿成长/Synthetic Member 02发育里程碑.md");
+    const raw = await readUniqueSsotFile("发育里程碑.md");
     return parseMilestones(raw);
   } catch (e) {
     console.warn("build:data milestones skipped:", (e as Error).message);
@@ -61,7 +61,7 @@ export async function buildMilestones() {
 
 export async function buildVaccines() {
   try {
-    const raw = await readSsotFile("_knowledge/02.医疗健康/Synthetic Member 02/疫苗接种计划.md");
+    const raw = await readUniqueSsotFile("/疫苗接种计划.md");
     return parseVaccines(raw);
   } catch (e) {
     console.warn("build:data vaccines skipped:", (e as Error).message);

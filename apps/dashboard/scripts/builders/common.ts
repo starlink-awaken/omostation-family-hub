@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
 import crypto from "node:crypto";
 import YAML from "yaml";
 import { extractFrontmatter, normalizeInlineText, stripFrontmatter } from "../../src/lib/extract";
@@ -90,6 +91,43 @@ export function encodeDocHref(href: string): string {
 
 export async function readSsotFile(relativePath: string): Promise<string> {
   return readFile(ssotPath(relativePath), "utf8");
+}
+
+async function collectSsotMatches(
+  directory: string,
+  relativeDirectory: string,
+  suffix: string,
+  matches: string[],
+): Promise<void> {
+  const entries = (await readdir(directory, { withFileTypes: true })).sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) continue;
+    const absolute = path.join(directory, entry.name);
+    const relative = path.posix.join(relativeDirectory, entry.name);
+    if (entry.isDirectory()) {
+      await collectSsotMatches(absolute, relative, suffix, matches);
+    } else if (entry.isFile() && relative.endsWith(suffix)) {
+      matches.push(relative);
+    }
+  }
+}
+
+export async function findUniqueSsotPath(suffix: string): Promise<string> {
+  if (!suffix || suffix.startsWith("//") || suffix.includes("..") || suffix.includes("\\")) {
+    throw new Error("SSOT suffix must be a safe POSIX suffix");
+  }
+  const matches: string[] = [];
+  await collectSsotMatches(ssotPath("_knowledge"), "_knowledge", suffix, matches);
+  if (matches.length !== 1) {
+    throw new Error(`expected exactly one SSOT file matching ${suffix}; found ${matches.length}`);
+  }
+  return matches[0];
+}
+
+export async function readUniqueSsotFile(suffix: string): Promise<string> {
+  return readSsotFile(await findUniqueSsotPath(suffix));
 }
 
 export async function loadRawYaml<T>(fileName: string): Promise<Partial<T>> {
