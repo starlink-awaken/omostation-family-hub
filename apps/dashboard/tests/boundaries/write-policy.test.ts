@@ -206,3 +206,18 @@ test("legacy shell backup cannot mutate Documents", async () => {
   expect(script).toContain("exit 78");
   expect(script).not.toMatch(/git\s+(add|commit)/u);
 });
+
+test("browser clients and deployment contract expose pending rather than saved semantics", async () => {
+  const editClient = await readFile(path.join(process.cwd(), "src", "components", "edit", "EditClient.tsx"), "utf8");
+  const quickActions = await readFile(
+    path.join(process.cwd(), "src", "components", "dashboard", "QuickActions.tsx"),
+    "utf8",
+  );
+  const env = await readFile(path.join(process.cwd(), ".env.example"), "utf8");
+  expect(editClient).toContain("已提交审批");
+  expect(editClient).not.toContain('setSaveMsg("✅ 已保存")');
+  expect(quickActions).toContain("已提交审批");
+  expect(env).toContain("NEXT_PUBLIC_FAMILY_CSRF_TOKEN=");
+  expect(env).toContain("FAMILY_VACCINE_DOCUMENT_RELATIVE=");
+  expect(env).toContain("FAMILY_MILESTONE_DOCUMENT_RELATIVE=");
+});
