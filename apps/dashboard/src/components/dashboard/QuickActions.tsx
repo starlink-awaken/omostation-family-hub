@@ -71,13 +71,11 @@ export function QuickActions() {
         body: JSON.stringify({ path: "_storage/inbox/快速记账.md", content: newContent }),
       });
 
-      if (res.ok) {
-        showToastMsg("success", `✅ 已记录 ¥${amount} — ${description}`);
-        setAmount("");
-        setDescription("");
-        setShowDialog(false);
+      const result = (await res.json()) as { status?: string; proposalId?: string; error?: string };
+      if (res.ok && result.status === "pending" && result.proposalId) {
+        showToastMsg("success", `⏳ 已提交审批 ${result.proposalId}`);
       } else {
-        showToastMsg("error", "❌ 记账保存失败");
+        showToastMsg("error", `❌ ${result.error || "记账提案失败"}`);
       }
     } catch {
       showToastMsg("error", "❌ 记账保存失败");

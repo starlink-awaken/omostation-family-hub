@@ -26,16 +26,16 @@ test.describe("Login", () => {
 });
 
 test.describe("Authenticated pages", () => {
-  test("Documents writes remain disabled", async ({ request }) => {
+  test("Documents mutation and snapshot routes remain separately guarded", async ({ request }) => {
     const save = await request.post("/api/file/save", {
       data: { path: "_knowledge/test.md", content: "synthetic" },
     });
     const backup = await request.get("/api/cron/ssot-backup");
 
     expect(save.status()).toBe(403);
-    expect(backup.status()).toBe(403);
-    expect(await save.json()).toMatchObject({ code: "DOCUMENTS_WRITE_DISABLED" });
-    expect(await backup.json()).toMatchObject({ code: "DOCUMENTS_WRITE_DISABLED" });
+    expect(backup.status()).toBe(401);
+    expect(await save.json()).toEqual({ error: "缺少 CSRF 校验" });
+    expect(await backup.json()).toEqual({ error: "unauthorized" });
   });
 
   test("/ (home) loads", async ({ page }) => {

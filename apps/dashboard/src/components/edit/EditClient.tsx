@@ -85,9 +85,10 @@ export function EditClient() {
         headers: { "Content-Type": "application/json", ...csrfHeaders() },
         body: JSON.stringify({ path: filePath, content }),
       });
-      if (!res.ok) throw new Error((await res.text()) || "保存失败");
-      setOrigContent(content);
-      setSaveMsg("✅ 已保存");
+      const result = (await res.json()) as { status?: string; proposalId?: string; error?: string };
+      if (!res.ok) throw new Error(result.error || "保存失败");
+      if (result.status !== "pending" || !result.proposalId) throw new Error("提案状态无效");
+      setSaveMsg(`⏳ 已提交审批：${result.proposalId}`);
       setTimeout(() => setSaveMsg(""), 3000);
     } catch (err) {
       setSaveMsg(`❌ ${err instanceof Error ? err.message : "保存失败"}`);
@@ -141,17 +142,17 @@ export function EditClient() {
       headers: { "Content-Type": "application/json", ...csrfHeaders() },
       body: JSON.stringify({ path: relPath, content: `# ${name.replace(/\.md$/, "")}\n\n` }),
     });
-    if (res.ok) {
+    const result = (await res.json()) as { status?: string; proposalId?: string; error?: string };
+    if (res.ok && result.status === "pending" && result.proposalId) {
       setFilePath(relPath);
       setContent(`# ${name.replace(/\.md$/, "")}\n\n`);
-      setOrigContent(`# ${name.replace(/\.md$/, "")}\n\n`);
-      setSaveMsg("✅ 已创建");
+      setOrigContent("");
+      setSaveMsg(`⏳ 已提交审批：${result.proposalId}`);
       setTimeout(() => setSaveMsg(""), 3000);
-      fetchTree();
     } else {
-      setSaveMsg("❌ 创建失败");
+      setSaveMsg(`❌ ${result.error || "创建失败"}`);
     }
-  }, [fetchTree]);
+  }, []);
 
   if (loading) {
     return (
