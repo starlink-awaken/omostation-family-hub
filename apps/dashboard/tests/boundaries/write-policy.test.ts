@@ -12,6 +12,7 @@ import {
 import { POST as saveFile } from "@/app/api/file/save/route";
 import { GET as backupDocuments } from "@/app/api/cron/ssot-backup/route";
 import { markMilestoneAchieved, updateVaccineStatus } from "@/lib/ssot-writer";
+import { createDocumentsSnapshotReceipt } from "@/lib/state-snapshot";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -93,23 +94,74 @@ test("Cockpit rejection removes newly staged payload and preserves Documents", a
   expect(await readFile(target, "utf8")).toBe("old\n");
 });
 
-test("file save requires CSRF while legacy backup remains disabled", async () => {
+test("file save requires CSRF while snapshot route requires cron auth", async () => {
   const saveResponse = await saveFile(new Request("http://localhost/api/file/save", { method: "POST" }));
   const backupResponse = await backupDocuments(new Request("http://localhost/api/cron/ssot-backup"));
 
   expect(saveResponse.status).toBe(403);
-  expect(backupResponse.status).toBe(403);
+  expect(backupResponse.status).toBe(401);
   await expect(saveResponse.json()).resolves.toEqual({ error: "缺少 CSRF 校验" });
-  await expect(backupResponse.json()).resolves.toMatchObject({ code: "DOCUMENTS_WRITE_DISABLED" });
+  await expect(backupResponse.json()).resolves.toEqual({ error: "unauthorized" });
 });
 
-test("domain writers reject before reading Documents", async () => {
-  await expect(updateVaccineStatus("name", "dose", "2026-01-01")).rejects.toBeInstanceOf(
-    DocumentsWriteDisabledError,
+test("domain proposal writers require explicit target bindings before reading Documents", async () => {
+  await expect(updateVaccineStatus("name", "dose", "2026-01-01")).rejects.toThrow(
+    "FAMILY_VACCINE_DOCUMENT_RELATIVE is required",
   );
-  await expect(markMilestoneAchieved("title", "2026-01-01")).rejects.toBeInstanceOf(
-    DocumentsWriteDisabledError,
+  await expect(markMilestoneAchieved("title", "2026-01-01")).rejects.toThrow(
+    "FAMILY_MILESTONE_DOCUMENT_RELATIVE is required",
   );
+});
+
+test("vaccine update creates a proposal from an explicit private target binding", async () => {
+  const documentsRoot = await mkdtemp(path.join(os.tmpdir(), "family-documents-"));
+  const stateRoot = await mkdtemp(path.join(os.tmpdir(), "family-state-"));
+  const relative = "_knowledge/health/vaccines.md";
+  const target = path.join(documentsRoot, relative);
+  await mkdir(path.dirname(target), { recursive: true });
+  const original = "| 月龄 | 疫苗 | 剂次 | 日期 | 实际 | 状态 | 备注 |\n| 1 | A | 1 | x |  | ⏳ | |\n";
+  await writeFile(target, original);
+  vi.stubEnv("FAMILY_DOCUMENTS_ROOT", documentsRoot);
+  vi.stubEnv("FAMILY_DASHBOARD_STATE_ROOT", stateRoot);
+  vi.stubEnv("FAMILY_VACCINE_DOCUMENT_RELATIVE", relative);
+  vi.stubEnv("COCKPIT_INTERNAL_URL", "http://cockpit.internal");
+  vi.stubEnv("FAMILY_HITL_COCKPIT_API_KEY", "test-key");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_url, init) => {
+      const proposal = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({ status: "pending", proposal_id: proposal.id }), { status: 202 });
+    }),
+  );
+  const result = await updateVaccineStatus("A", "1", "2026-08-30");
+  expect(result.status).toBe("pending");
+  expect(await readFile(target, "utf8")).toBe(original);
+});
+
+test("snapshot writes only an aggregate Workspace-state receipt", async () => {
+  const documentsRoot = await mkdtemp(path.join(os.tmpdir(), "family-documents-"));
+  const stateRoot = await mkdtemp(path.join(os.tmpdir(), "family-state-"));
+  await writeFile(path.join(documentsRoot, "note.md"), "private body\n");
+  vi.stubEnv("FAMILY_DOCUMENTS_ROOT", documentsRoot);
+  vi.stubEnv("FAMILY_DASHBOARD_STATE_ROOT", stateRoot);
+  const receipt = await createDocumentsSnapshotReceipt();
+  const serialized = JSON.stringify(receipt);
+  expect(receipt).toMatchObject({
+    schema: "family-documents-snapshot/v1",
+    fileCount: 1,
+    writesDocuments: false,
+  });
+  expect(serialized).not.toContain("private body");
+  expect(serialized).not.toContain(documentsRoot);
+  vi.stubEnv("FAMILY_CRON_TOKEN", "cron-secret");
+  const response = await backupDocuments(
+    new Request("http://localhost/api/cron/ssot-backup?cron_token=cron-secret"),
+  );
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toMatchObject({
+    schema: "family-documents-snapshot/v1",
+    writesDocuments: false,
+  });
 });
 
 test("task mutation writes only below the explicit state root", async () => {
