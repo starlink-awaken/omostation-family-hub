@@ -13,6 +13,7 @@ from .mutations import (
     VaccineUpdateHandler,
     MilestoneAchieveHandler,
 )
+from .executor import execute_family_dashboard_mutation, execute_family_dashboard_mutation_sync
 
 __all__ = [
     "HitlTransactionOwner",
@@ -25,4 +26,6 @@ __all__ = [
     "ReplaceTextHandler",
     "VaccineUpdateHandler",
     "MilestoneAchieveHandler",
+    "execute_family_dashboard_mutation",
+    "execute_family_dashboard_mutation_sync",
 ]
