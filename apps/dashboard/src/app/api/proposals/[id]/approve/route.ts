@@ -12,10 +12,10 @@ import { readFile } from "node:fs/promises";
 
 export async function POST(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id: proposalId } = await params;
   try {
-    const proposalId = params.id;
 
     // Load proposal
     let proposal: Record<string, unknown>;
