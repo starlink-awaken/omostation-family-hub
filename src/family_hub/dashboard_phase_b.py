@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -21,20 +23,52 @@ from .dashboard_runtime import (
 
 def _bun_build_runner(app_root: Path) -> BuildRunner:
     def run(env: dict[str, str]) -> None:
-        completed = subprocess.run(
-            ["bun", "run", "scripts/verify-paths.ts"],
-            cwd=app_root,
-            env={"PATH": os.environ.get("PATH", ""), **env},
-            check=False,
+        if sys.platform != "darwin":
+            raise PhaseBError("macOS sandbox-exec is required for dashboard builds")
+        sandbox_exec = Path("/usr/bin/sandbox-exec")
+        try:
+            metadata = os.lstat(sandbox_exec)
+        except OSError as exc:
+            raise PhaseBError("sandbox-exec must be a regular executable") from exc
+        if not stat.S_ISREG(metadata.st_mode) or not os.access(sandbox_exec, os.X_OK):
+            raise PhaseBError("sandbox-exec must be a regular executable")
+
+        raw_documents_root = env.get("FAMILY_DOCUMENTS_ROOT", "")
+        if not raw_documents_root:
+            raise PhaseBError("Documents root is required")
+        if any(ord(character) < 32 or ord(character) == 127 for character in raw_documents_root):
+            raise PhaseBError("Documents root contains a control character")
+        documents_root = str(Path(raw_documents_root).expanduser().resolve())
+        escaped_root = documents_root.replace("\\", "\\\\").replace('"', '\\"')
+        policy = "\n".join(
+            (
+                "(version 1)",
+                "(allow default)",
+                f'(deny file-write* (subpath "{escaped_root}"))',
+            )
         )
-        if completed.returncode != 0:
-            raise PhaseBError("path verification failed")
-        subprocess.run(
-            ["bun", "run", "scripts/build-all.ts"],
-            cwd=app_root,
-            env={"PATH": os.environ.get("PATH", ""), **env},
-            check=True,
-        )
+        sandbox_env = {
+            "PATH": os.environ.get("PATH", ""),
+            "FAMILY_DOCUMENTS_ROOT": documents_root,
+            "FAMILY_DASHBOARD_STATE_ROOT": str(Path(env["FAMILY_DASHBOARD_STATE_ROOT"]).expanduser().resolve()),
+        }
+        for script in (
+            "scripts/verify-paths.ts",
+            "scripts/build-all.ts",
+            "scripts/verify-summary.ts",
+            "scripts/verify-domain-data.ts",
+        ):
+            try:
+                completed = subprocess.run(
+                    [str(sandbox_exec), "-p", policy, "bun", "run", script],
+                    cwd=app_root,
+                    env=sandbox_env,
+                    check=False,
+                )
+            except OSError as exc:
+                raise PhaseBError("sandboxed build launch failed") from exc
+            if completed.returncode != 0:
+                raise PhaseBError(f"sandboxed build step failed: {script}")
 
     return run
 
@@ -79,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
     verify = sub.add_parser("verify-runtime")
     verify.add_argument("--documents-root", type=Path, required=True)
     verify.add_argument("--state-root", type=Path, required=True)
+    verify.add_argument("--expected-fingerprint", required=True)
     verify.add_argument("--json", action="store_true")
 
     canary = sub.add_parser("plan-canary")
@@ -137,12 +172,12 @@ def main(argv: list[str] | None = None) -> int:
         _emit(receipt, as_json=args.json, default_key="source_fingerprint")
         return 0
     bound_plan = _load_bound_plan(args.state_root)
-    fingerprint = plan_fingerprint(bound_plan)
+    plan_fingerprint(bound_plan)
     receipt = verify_runtime(
         args.documents_root,
         args.documents_root / "family-dashboard-app",
         args.state_root,
-        expected_fingerprint=fingerprint,
+        expected_fingerprint=args.expected_fingerprint,
     )
     _emit(receipt, as_json=args.json, default_key="source_fingerprint")
     return 0
