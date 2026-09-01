@@ -753,6 +753,7 @@ def test_bun_build_runner_wraps_all_build_steps_in_one_read_only_policy(
     calls: list[tuple[list[str], dict[str, str]]] = []
     monkeypatch.setattr(phase_b.sys, "platform", "darwin")
     monkeypatch.setattr(phase_b.os, "lstat", lambda _path: SimpleNamespace(st_mode=stat.S_IFREG | 0o755))
+    monkeypatch.setattr(phase_b.os, "access", lambda _path, _mode: True)
 
     def fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
         calls.append((command, kwargs["env"]))  # type: ignore[index]
@@ -799,6 +800,8 @@ def test_bun_build_runner_rejects_control_characters_in_documents_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(phase_b.sys, "platform", "darwin")
+    monkeypatch.setattr(phase_b.os, "lstat", lambda _path: SimpleNamespace(st_mode=stat.S_IFREG | 0o755))
+    monkeypatch.setattr(phase_b.os, "access", lambda _path, _mode: True)
     with pytest.raises(PhaseBError, match="control character"):
         phase_b._bun_build_runner(tmp_path)(
             {
@@ -814,6 +817,7 @@ def test_bun_build_runner_rejects_empty_documents_root(
 ) -> None:
     monkeypatch.setattr(phase_b.sys, "platform", "darwin")
     monkeypatch.setattr(phase_b.os, "lstat", lambda _path: SimpleNamespace(st_mode=stat.S_IFREG | 0o755))
+    monkeypatch.setattr(phase_b.os, "access", lambda _path, _mode: True)
     with pytest.raises(PhaseBError, match="Documents root is required"):
         phase_b._bun_build_runner(tmp_path)(
             {
@@ -861,6 +865,7 @@ def test_bun_build_runner_rejects_failed_launch_or_invalid_policy(
 ) -> None:
     monkeypatch.setattr(phase_b.sys, "platform", "darwin")
     monkeypatch.setattr(phase_b.os, "lstat", lambda _path: SimpleNamespace(st_mode=stat.S_IFREG | 0o755))
+    monkeypatch.setattr(phase_b.os, "access", lambda _path, _mode: True)
 
     def failed_run(*_args: object, **_kwargs: object) -> object:
         if isinstance(result, BaseException):
