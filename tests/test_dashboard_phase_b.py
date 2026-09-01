@@ -143,6 +143,36 @@ def test_runtime_plan_rejects_symlink_inside_builder_input(tmp_path: Path) -> No
         plan_runtime(documents, legacy, state)
 
 
+def test_runtime_plan_excludes_non_builder_control_metadata_links(tmp_path: Path) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    baseline = plan_runtime(documents, legacy, state)
+    shared_standard = tmp_path / "shared-standard.md"
+    shared_standard.write_text("# shared standard\n", encoding="utf-8")
+    metadata = documents / "_control" / "_meta"
+    metadata.mkdir()
+    (metadata / "standard.md").symlink_to(shared_standard)
+
+    observed = plan_runtime(documents, legacy, state)
+
+    assert observed["input_closure"] == baseline["input_closure"]
+    assert observed["fingerprint"] == baseline["fingerprint"]
+
+
+def test_runtime_plan_excludes_builder_ignored_node_modules_links(tmp_path: Path) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    baseline = plan_runtime(documents, legacy, state)
+    package_bin = documents / "_archive" / "snapshot" / "node_modules" / ".bin"
+    package_bin.mkdir(parents=True)
+    executable = tmp_path / "package-cli.js"
+    executable.write_text("export {};\n", encoding="utf-8")
+    (package_bin / "package-cli").symlink_to(executable)
+
+    observed = plan_runtime(documents, legacy, state)
+
+    assert observed["input_closure"] == baseline["input_closure"]
+    assert observed["fingerprint"] == baseline["fingerprint"]
+
+
 def test_normalized_product_digest_removes_only_declared_fields(tmp_path: Path) -> None:
     first = tmp_path / "summary.json"
     second = tmp_path / "other" / "summary.json"
@@ -162,6 +192,22 @@ def test_normalized_product_digest_removes_only_declared_fields(tmp_path: Path) 
         encoding="utf-8",
     )
     assert runtime.normalized_product_digest(first) != runtime.normalized_product_digest(second)
+
+
+def test_normalized_product_digest_canonicalizes_unpaired_surrogates(tmp_path: Path) -> None:
+    first = tmp_path / "calendar.json"
+    second = tmp_path / "other" / "calendar.json"
+    second.parent.mkdir()
+    first.write_text(
+        '{"label":"\\udf82","nested":{"marker":"\\ud83c"}}\n',
+        encoding="utf-8",
+    )
+    second.write_text(
+        '{"nested":{"marker":"\\ud83c"},"label":"\\udf82"}\n',
+        encoding="utf-8",
+    )
+
+    assert runtime.normalized_product_digest(first) == runtime.normalized_product_digest(second)
 
 
 @pytest.mark.parametrize(

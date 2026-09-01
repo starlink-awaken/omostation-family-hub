@@ -115,10 +115,18 @@ def builder_input_closure(documents_root: Path, legacy_app_root: Path) -> dict[s
         if tree.is_symlink() or not tree.is_dir():
             raise PhaseBError(f"builder input root is invalid: {tree_name}")
         for node in sorted(tree.rglob("*"), key=lambda item: item.relative_to(documents).as_posix()):
+            relative = node.relative_to(documents)
+            tree_relative = node.relative_to(tree)
+            if tree_name == "_archive" and any(
+                part.startswith(".") or part == "node_modules" for part in tree_relative.parts
+            ):
+                continue
+            if relative.parts[:2] == ("_control", "_meta"):
+                continue
             if node.is_symlink():
                 raise PhaseBError("builder input closure contains a symlink")
             if node.is_file():
-                candidates.append((node, f"documents/{node.relative_to(documents).as_posix()}"))
+                candidates.append((node, f"documents/{relative.as_posix()}"))
             elif not node.is_dir():
                 raise PhaseBError("builder input closure contains a non-regular node")
     entries = sorted(
@@ -155,7 +163,7 @@ def normalized_product_digest(path: Path) -> str:
         value,
         VOLATILE_FIELDS_BY_PRODUCT.get(path.name, frozenset()),
     )
-    raw = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    raw = json.dumps(normalized, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(raw.encode()).hexdigest()
 
 
