@@ -61,10 +61,12 @@ def _bun_build_runner(app_root: Path) -> BuildRunner:
             try:
                 completed = subprocess.run(
                     [str(sandbox_exec), "-p", policy, "bun", "run", script],
-                    cwd=app_root,
-                    env=sandbox_env,
-                    check=False,
-                )
+                cwd=app_root,
+                env=sandbox_env,
+                check=False,
+                stdout=sys.stderr,
+                stderr=sys.stderr,
+            )
             except OSError as exc:
                 raise PhaseBError("sandboxed build launch failed") from exc
             if completed.returncode != 0:

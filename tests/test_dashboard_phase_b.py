@@ -796,13 +796,15 @@ def test_bun_build_runner_wraps_all_build_steps_in_one_read_only_policy(
 ) -> None:
     documents = (tmp_path / 'Documents "quoted"').resolve()
     state = (tmp_path / "state").resolve()
-    calls: list[tuple[list[str], dict[str, str]]] = []
+    calls: list[tuple[list[str], dict[str, str], object, object]] = []
     monkeypatch.setattr(phase_b.sys, "platform", "darwin")
     monkeypatch.setattr(phase_b.os, "lstat", lambda _path: SimpleNamespace(st_mode=stat.S_IFREG | 0o755))
     monkeypatch.setattr(phase_b.os, "access", lambda _path, _mode: True)
 
     def fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
-        calls.append((command, kwargs["env"]))  # type: ignore[index]
+        calls.append(  # type: ignore[arg-type]
+            (command, kwargs["env"], kwargs.get("stdout"), kwargs.get("stderr"))
+        )
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(phase_b.subprocess, "run", fake_run)
@@ -823,6 +825,7 @@ def test_bun_build_runner_wraps_all_build_steps_in_one_read_only_policy(
     assert len({call[0][2] for call in calls}) == 1
     assert f'(deny file-write* (subpath "{str(documents).replace(chr(34), chr(92) + chr(34))}"))' in calls[0][0][2]
     assert all(set(call[1]) == {"PATH", "FAMILY_DOCUMENTS_ROOT", "FAMILY_DASHBOARD_STATE_ROOT"} for call in calls)
+    assert all(call[2] is phase_b.sys.stderr and call[3] is phase_b.sys.stderr for call in calls)
 
 
 @pytest.mark.parametrize("platform", ["linux", "win32"])
@@ -988,7 +991,7 @@ def test_real_macos_sandboxed_bun_build_runs_existing_verifiers(tmp_path: Path) 
         (manifests / f"{name}.yaml").write_text("{}\n", encoding="utf-8")
     (documents / "_control" / "STATUS.md").write_text("## 当前状态：BUSY\n", encoding="utf-8")
     (documents / "_control" / "STATE.md").write_text(
-        "---\nlast-reviewed: 2026-07-02\n---\n| 当前阶段 | **本地物理整合完成** |\n",
+        "---\nlast-reviewed: 2026-08-01\n---\n| 当前阶段 | **本地物理整合完成** |\n",
         encoding="utf-8",
     )
     (documents / "_control" / "signals.md").write_text(
