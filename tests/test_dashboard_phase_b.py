@@ -283,6 +283,228 @@ def test_apply_runtime_failure_removes_staging_and_preserves_source(tmp_path: Pa
     assert (legacy / "data-manifest" / "summary.yaml").read_bytes() == before
 
 
+@pytest.mark.parametrize(
+    ("staging_suffix", "attack"),
+    [(suffix, attack) for suffix in ("-a", "-b") for attack in ("content", "mode")],
+)
+def test_apply_runtime_rejects_builder_modified_manifest(
+    tmp_path: Path,
+    staging_suffix: str,
+    attack: str,
+) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    plan = plan_runtime(documents, legacy, state)
+
+    def build(env: dict[str, str]) -> None:
+        staging = Path(env["FAMILY_DASHBOARD_STATE_ROOT"])
+        generated = staging / "generated"
+        generated.mkdir(parents=True)
+        (generated / "summary.json").write_text('{"value": 1}\n', encoding="utf-8")
+        if staging.name.endswith(staging_suffix):
+            manifest = staging / "manifests" / "summary.yaml"
+            if attack == "content":
+                manifest.write_text("title: builder-controlled\n", encoding="utf-8")
+            else:
+                manifest.chmod(0o640)
+
+    with pytest.raises(PhaseBError, match="staging manifest"):
+        apply_runtime(
+            plan,
+            documents_root=documents,
+            legacy_app_root=legacy,
+            state_root=state,
+            expected_fingerprint=plan["fingerprint"],
+            build_runner=build,
+        )
+    assert not state.exists()
+    assert not list(state.parent.glob(".dashboard.staging-*"))
+
+
+@pytest.mark.parametrize("staging_suffix", ["-a", "-b"])
+def test_apply_runtime_rejects_nonregular_staging_node(
+    tmp_path: Path,
+    staging_suffix: str,
+) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    plan = plan_runtime(documents, legacy, state)
+    outside = tmp_path / "outside-cache"
+    outside.mkdir()
+
+    def build(env: dict[str, str]) -> None:
+        staging = Path(env["FAMILY_DASHBOARD_STATE_ROOT"])
+        generated = staging / "generated"
+        generated.mkdir(parents=True)
+        (generated / "summary.json").write_text('{"value": 1}\n', encoding="utf-8")
+        if staging.name.endswith(staging_suffix):
+            (staging / "cache").rmdir()
+            (staging / "cache").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(PhaseBError, match="staging layout contains a non-regular node"):
+        apply_runtime(
+            plan,
+            documents_root=documents,
+            legacy_app_root=legacy,
+            state_root=state,
+            expected_fingerprint=plan["fingerprint"],
+            build_runner=build,
+        )
+    assert not state.exists()
+    assert not list(state.parent.glob(".dashboard.staging-*"))
+    assert outside.exists()
+
+
+@pytest.mark.parametrize(
+    ("staging_suffix", "unexpected_path", "is_directory"),
+    [
+        ("-a", "builder-output.txt", False),
+        ("-a", "builder-output", True),
+        ("-b", "builder-output.txt", False),
+        ("-b", "builder-output", True),
+    ],
+)
+def test_apply_runtime_rejects_unknown_staging_file_or_directory(
+    tmp_path: Path,
+    staging_suffix: str,
+    unexpected_path: str,
+    is_directory: bool,
+) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    plan = plan_runtime(documents, legacy, state)
+
+    def build(env: dict[str, str]) -> None:
+        staging = Path(env["FAMILY_DASHBOARD_STATE_ROOT"])
+        generated = staging / "generated"
+        generated.mkdir(parents=True)
+        (generated / "summary.json").write_text('{"value": 1}\n', encoding="utf-8")
+        if staging.name.endswith(staging_suffix):
+            unexpected = staging / unexpected_path
+            if is_directory:
+                unexpected.mkdir()
+            else:
+                unexpected.write_text("unexpected\n", encoding="utf-8")
+
+    with pytest.raises(PhaseBError, match="staging layout"):
+        apply_runtime(
+            plan,
+            documents_root=documents,
+            legacy_app_root=legacy,
+            state_root=state,
+            expected_fingerprint=plan["fingerprint"],
+            build_runner=build,
+        )
+    assert not state.exists()
+    assert not list(state.parent.glob(".dashboard.staging-*"))
+
+
+@pytest.mark.parametrize("staging_suffix", ["-a", "-b"])
+def test_apply_runtime_rejects_builder_created_premature_receipt(
+    tmp_path: Path,
+    staging_suffix: str,
+) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    plan = plan_runtime(documents, legacy, state)
+
+    def build(env: dict[str, str]) -> None:
+        staging = Path(env["FAMILY_DASHBOARD_STATE_ROOT"])
+        generated = staging / "generated"
+        generated.mkdir(parents=True)
+        (generated / "summary.json").write_text('{"value": 1}\n', encoding="utf-8")
+        if staging.name.endswith(staging_suffix):
+            (staging / "migration" / "receipt.json").write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(PhaseBError, match="staging migration"):
+        apply_runtime(
+            plan,
+            documents_root=documents,
+            legacy_app_root=legacy,
+            state_root=state,
+            expected_fingerprint=plan["fingerprint"],
+            build_runner=build,
+        )
+    assert not state.exists()
+    assert not list(state.parent.glob(".dashboard.staging-*"))
+
+
+def test_apply_runtime_post_promotion_verify_failure_removes_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    plan = plan_runtime(documents, legacy, state)
+
+    def build(env: dict[str, str]) -> None:
+        generated = Path(env["FAMILY_DASHBOARD_STATE_ROOT"]) / "generated"
+        generated.mkdir(parents=True)
+        (generated / "summary.json").write_text('{"value": 1}\n', encoding="utf-8")
+
+    def fail_verification(*_args: object, **_kwargs: object) -> dict[str, object]:
+        (state / "migration" / "receipt.json").write_text("{}\n", encoding="utf-8")
+        raise PhaseBError("injected post-promotion verification failure")
+
+    monkeypatch.setattr(runtime, "verify_runtime", fail_verification)
+    with pytest.raises(PhaseBError, match="injected post-promotion verification failure"):
+        apply_runtime(
+            plan,
+            documents_root=documents,
+            legacy_app_root=legacy,
+            state_root=state,
+            expected_fingerprint=plan["fingerprint"],
+            build_runner=build,
+        )
+    assert not state.exists()
+
+
+def test_apply_runtime_final_receipt_write_failure_removes_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    plan = plan_runtime(documents, legacy, state)
+
+    def build(env: dict[str, str]) -> None:
+        generated = Path(env["FAMILY_DASHBOARD_STATE_ROOT"]) / "generated"
+        generated.mkdir(parents=True)
+        (generated / "summary.json").write_text('{"value": 1}\n', encoding="utf-8")
+
+    atomic_json = runtime._atomic_json
+
+    def fail_receipt_write(path: Path, payload: dict[str, object]) -> None:
+        atomic_json(path, payload)
+        if path.name == "receipt.json":
+            raise OSError("injected final receipt write failure")
+
+    monkeypatch.setattr(runtime, "_atomic_json", fail_receipt_write)
+    with pytest.raises(OSError, match="injected final receipt write failure"):
+        apply_runtime(
+            plan,
+            documents_root=documents,
+            legacy_app_root=legacy,
+            state_root=state,
+            expected_fingerprint=plan["fingerprint"],
+            build_runner=build,
+        )
+    assert not state.exists()
+
+
+def test_apply_runtime_existing_target_collision_is_preserved(tmp_path: Path) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    plan = plan_runtime(documents, legacy, state)
+    state.mkdir(parents=True)
+    marker = state / "existing-target"
+    marker.write_text("owned elsewhere\n", encoding="utf-8")
+
+    with pytest.raises(PhaseBError, match="target must be absent"):
+        apply_runtime(
+            plan,
+            documents_root=documents,
+            legacy_app_root=legacy,
+            state_root=state,
+            expected_fingerprint=plan["fingerprint"],
+            build_runner=lambda _env: None,
+        )
+    assert marker.read_text(encoding="utf-8") == "owned elsewhere\n"
+
+
 def test_apply_runtime_promotes_equal_fresh_builds_and_records_legacy_delta(tmp_path: Path) -> None:
     documents, legacy, state = _seed_runtime_source(tmp_path)
     plan = plan_runtime(documents, legacy, state)

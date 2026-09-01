@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -319,6 +320,113 @@ def _assert_input_closure(
         raise PhaseBError("builder input closure changed")
 
 
+def _exact_children(directory: Path, expected: set[str], label: str, *, directories: bool) -> dict[str, Path]:
+    try:
+        root_mode = os.lstat(directory).st_mode
+    except OSError as exc:
+        raise PhaseBError(f"staging {label} is invalid") from exc
+    if not stat.S_ISDIR(root_mode):
+        raise PhaseBError(f"staging {label} is invalid")
+    children = {child.name: child for child in directory.iterdir()}
+    if children.keys() != expected:
+        raise PhaseBError(f"staging {label} mismatch")
+    expected_kind = stat.S_ISDIR if directories else stat.S_ISREG
+    for child in children.values():
+        try:
+            child_mode = os.lstat(child).st_mode
+        except OSError as exc:
+            raise PhaseBError(f"staging {label} contains an invalid node") from exc
+        if not expected_kind(child_mode):
+            raise PhaseBError(f"staging {label} contains a non-regular node")
+    return children
+
+
+def _expected_manifest_entries(plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    entries_by_digest = {entry.get("path_digest"): entry for entry in plan.get("entries", [])}
+    expected: dict[str, dict[str, Any]] = {}
+    for name in MANIFEST_NAMES:
+        logical_path = f"manifest:{name}"
+        path_digest = "sha256:" + hashlib.sha256(logical_path.encode()).hexdigest()
+        entry = entries_by_digest.get(path_digest)
+        if not isinstance(entry, dict):
+            raise PhaseBError("runtime plan manifest binding is invalid")
+        expected[name] = entry
+    return expected
+
+
+def _read_bound_json(path: Path, label: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise PhaseBError(f"staging {label} is invalid") from exc
+    if not isinstance(payload, dict):
+        raise PhaseBError(f"staging {label} is invalid")
+    return payload
+
+
+def _validate_staging(
+    staging: Path,
+    *,
+    legacy_app_root: Path,
+    plan: dict[str, Any],
+    products: dict[str, str],
+    parity: dict[str, Any] | None,
+) -> None:
+    top_level = _exact_children(
+        staging,
+        {"manifests", "generated", "cache", "migration"},
+        "layout",
+        directories=True,
+    )
+    manifests = _exact_children(
+        top_level["manifests"],
+        {f"{name}.yaml" for name in MANIFEST_NAMES},
+        "manifest set",
+        directories=False,
+    )
+    expected_entries = _expected_manifest_entries(plan)
+    for name in MANIFEST_NAMES:
+        source = legacy_app_root / "data-manifest" / f"{name}.yaml"
+        if _entry(source, f"manifest:{name}") != expected_entries[name]:
+            raise PhaseBError(f"staging manifest source changed: {name}.yaml")
+        staged = manifests[f"{name}.yaml"]
+        if stat.S_IMODE(os.lstat(staged).st_mode) != 0o600 or _sha(staged) != _sha(source):
+            raise PhaseBError(f"staging manifest differs: {name}.yaml")
+
+    _exact_children(
+        top_level["generated"],
+        set(products),
+        "generated set",
+        directories=False,
+    )
+    if product_digest_map(top_level["generated"]) != products:
+        raise PhaseBError("staging generated products changed")
+
+    _exact_children(top_level["cache"], set(), "cache", directories=False)
+    migration_names = {"plan.json"} if parity is None else {"plan.json", "parity.json"}
+    migration = _exact_children(
+        top_level["migration"],
+        migration_names,
+        "migration set",
+        directories=False,
+    )
+    if _read_bound_json(migration["plan.json"], "migration plan") != plan:
+        raise PhaseBError("staging migration plan differs")
+    if parity is not None and _read_bound_json(migration["parity.json"], "parity evidence") != parity:
+        raise PhaseBError("staging parity evidence differs")
+
+
+def _remove_transaction_path(path: Path) -> None:
+    try:
+        mode = os.lstat(path).st_mode
+    except FileNotFoundError:
+        return
+    if stat.S_ISDIR(mode):
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+
+
 def _run_build(build_runner: BuildRunner, documents_root: Path, staging: Path) -> None:
     try:
         build_runner(
@@ -350,6 +458,7 @@ def apply_runtime(
     if staging_a.exists() or staging_b.exists() or target.exists():
         raise PhaseBError("state target collision")
     expected_closure = plan["input_closure"]
+    transaction_state = "staging"
     try:
         staging_a.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
         _seed_staging(staging_a, legacy_app_root, plan)
@@ -371,13 +480,30 @@ def apply_runtime(
         legacy = product_digest_map(legacy_app_root / "app-data")
         parity = _parity_evidence(expected_closure, fresh_a, legacy)
         _atomic_json(staging_a / "migration" / "parity.json", parity)
-        shutil.rmtree(staging_b)
+        _assert_input_closure(expected_closure, documents_root, legacy_app_root)
+        _validate_staging(
+            staging_b,
+            legacy_app_root=legacy_app_root,
+            plan=plan,
+            products=fresh_b,
+            parity=None,
+        )
+        _remove_transaction_path(staging_b)
+        _assert_input_closure(expected_closure, documents_root, legacy_app_root)
+        _validate_staging(
+            staging_a,
+            legacy_app_root=legacy_app_root,
+            plan=plan,
+            products=fresh_a,
+            parity=parity,
+        )
         staging_a.chmod(0o700)
         for node in sorted(staging_a.rglob("*")):
             if node.is_symlink():
                 raise PhaseBError("staging contains a symlink")
             node.chmod(0o700 if node.is_dir() else 0o600)
         os.replace(staging_a, target)
+        transaction_state = "promoted"
         receipt = verify_runtime(
             documents_root,
             legacy_app_root,
@@ -385,13 +511,13 @@ def apply_runtime(
             expected_fingerprint=expected_fingerprint,
         )
         _atomic_json(target / "migration" / "receipt.json", receipt)
+        transaction_state = "receipt-written"
         return receipt
     except BaseException:
         for candidate in (staging_a, staging_b):
-            if candidate.exists():
-                shutil.rmtree(candidate)
-        if target.exists() and not (target / "migration" / "receipt.json").exists():
-            shutil.rmtree(target)
+            _remove_transaction_path(candidate)
+        if transaction_state in {"promoted", "receipt-written"}:
+            _remove_transaction_path(target)
         raise
 
 
