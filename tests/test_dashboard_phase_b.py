@@ -1,5 +1,10 @@
+import copy
 import hashlib
 import json
+import os
+import shutil
+import stat
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,7 +15,7 @@ import family_hub.dashboard_mutation as mutation
 import family_hub.dashboard_phase_b as phase_b
 import family_hub.dashboard_runtime as runtime
 from family_hub.dashboard_mutation import build_canary_proposal, execute_approved_mutation, stage_payload
-from family_hub.dashboard_runtime import PhaseBError, apply_runtime, plan_runtime
+from family_hub.dashboard_runtime import PhaseBError, apply_runtime, plan_runtime, verify_runtime
 
 
 def _seed_builder_input_trees(documents: Path) -> None:
@@ -48,6 +53,49 @@ def test_runtime_plan_is_private_pathless_and_deterministic(tmp_path: Path) -> N
     assert first["legacy_generated_count"] == 1
     assert first["state_root_ref"] == "runtime://family-hub/dashboard"
     assert str(tmp_path) not in str(first)
+
+
+def test_runtime_plan_has_no_paths_or_source_bodies_anywhere(tmp_path: Path) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    source_body = "PRIVATE-BODY-MUST-NOT-LEAK"
+    (documents / "_knowledge" / "knowledge.md").write_text(source_body, encoding="utf-8")
+    (legacy / "data-manifest" / "summary.yaml").write_text(
+        f'title: summary\nsource_body: "{source_body}"\n',
+        encoding="utf-8",
+    )
+
+    plan = plan_runtime(documents, legacy, state)
+    encoded = json.dumps(plan, ensure_ascii=False, sort_keys=True)
+
+    for forbidden in (
+        str(documents),
+        str(legacy),
+        "_knowledge",
+        "_archive",
+        "_control",
+        "data-manifest",
+        "app-data",
+        source_body,
+        "relative_path",
+    ):
+        assert forbidden not in encoded
+    assert all(set(entry) == {"path_digest", "sha256", "bytes", "mode"} for entry in plan["entries"])
+
+
+def test_plan_fingerprint_covers_the_complete_plan_payload(tmp_path: Path) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    plan = plan_runtime(documents, legacy, state)
+    original = plan["fingerprint"]
+
+    tampered = copy.deepcopy(plan)
+    tampered["required_free_bytes"] += 1
+    with pytest.raises(PhaseBError, match="fingerprint mismatch"):
+        runtime.plan_fingerprint(tampered)
+
+    rebound = copy.deepcopy(tampered)
+    rebound.pop("fingerprint")
+    rebound["fingerprint"] = runtime.canonical_plan_fingerprint(rebound)
+    assert runtime.plan_fingerprint(rebound) != original
 
 
 def test_runtime_plan_rejects_existing_target_and_symlink(tmp_path: Path) -> None:
@@ -114,6 +162,84 @@ def test_normalized_product_digest_removes_only_declared_fields(tmp_path: Path) 
         encoding="utf-8",
     )
     assert runtime.normalized_product_digest(first) != runtime.normalized_product_digest(second)
+
+
+@pytest.mark.parametrize(
+    ("name", "body"),
+    [
+        ("summary.json", "[]\n"),
+        ("search-index.json", "{}\n"),
+        ("summary.json", "1\n"),
+    ],
+)
+def test_product_digest_rejects_wrong_declared_root_shape(tmp_path: Path, name: str, body: str) -> None:
+    product = tmp_path / name
+    product.write_text(body, encoding="utf-8")
+    with pytest.raises(PhaseBError, match="root schema"):
+        runtime.normalized_product_digest(product)
+
+
+def test_product_digest_rejects_unknown_product_name(tmp_path: Path) -> None:
+    product = tmp_path / "surprise.json"
+    product.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(PhaseBError, match="unknown product"):
+        runtime.normalized_product_digest(product)
+
+
+@pytest.mark.parametrize(
+    ("name", "root"),
+    [
+        *((name, {}) for name in ("summary.json", "members.json", "health.json", "growth.json", "daily.json")),
+        *((name, {}) for name in ("assets.json", "milestones.json", "vaccines.json", "calendar.json", "finance.json")),
+        *((name, {}) for name in ("build-meta.json", "tags.json", "links.json")),
+        *((name, []) for name in ("timeline.json", "tasks.json", "search-index.json", "search-chunks.json")),
+        *((name, []) for name in ("search-embeddings.json", "search-chunks-embeddings.json")),
+    ],
+)
+def test_product_digest_accepts_each_declared_known_root_schema(tmp_path: Path, name: str, root: object) -> None:
+    product = tmp_path / name
+    product.write_text(json.dumps(root), encoding="utf-8")
+    assert runtime.normalized_product_digest(product).startswith("sha256:")
+
+
+def test_product_digest_blocks_unreadable_product(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    product = tmp_path / "summary.json"
+    product.write_text("{}\n", encoding="utf-8")
+    original_read_text = Path.read_text
+
+    def denied_read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path == product:
+            raise PermissionError("denied")
+        return original_read_text(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", denied_read_text)
+    with pytest.raises(PhaseBError, match="unreadable"):
+        runtime.normalized_product_digest(product)
+
+
+@pytest.mark.parametrize("body", ["not-json\n", "[]\n"])
+def test_runtime_plan_blocks_malformed_or_incompatible_legacy_baseline(tmp_path: Path, body: str) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    (legacy / "app-data" / "summary.json").write_text(body, encoding="utf-8")
+    with pytest.raises(PhaseBError, match="malformed|root schema"):
+        plan_runtime(documents, legacy, state)
+
+
+def test_runtime_plan_blocks_missing_legacy_baseline(tmp_path: Path) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    (legacy / "app-data" / "summary.json").unlink()
+    with pytest.raises(PhaseBError, match="product set is empty"):
+        plan_runtime(documents, legacy, state)
+
+
+def test_runtime_plan_blocks_symlinked_legacy_product_directory(tmp_path: Path) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    products = legacy / "app-data"
+    outside = tmp_path / "outside-products"
+    products.rename(outside)
+    products.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(PhaseBError, match="product directory"):
+        plan_runtime(documents, legacy, state)
 
 
 def test_apply_runtime_builds_in_staging_and_promotes_atomically(tmp_path: Path) -> None:
@@ -183,6 +309,77 @@ def test_apply_runtime_promotes_equal_fresh_builds_and_records_legacy_delta(tmp_
     assert receipt["legacy_delta_count"] == 1
     assert parity["legacy_delta"]["results"] == {"summary.json": "different"}
     assert not list(state.parent.glob(".dashboard.staging-*"))
+
+
+def _apply_seeded_runtime(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, object]]:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    plan = plan_runtime(documents, legacy, state)
+
+    def build(env: dict[str, str]) -> None:
+        generated = Path(env["FAMILY_DASHBOARD_STATE_ROOT"]) / "generated"
+        generated.mkdir(parents=True)
+        (generated / "summary.json").write_text('{"value": 2}\n', encoding="utf-8")
+
+    apply_runtime(
+        plan,
+        documents_root=documents,
+        legacy_app_root=legacy,
+        state_root=state,
+        expected_fingerprint=plan["fingerprint"],
+        build_runner=build,
+    )
+    return documents, legacy, state, plan
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda evidence: evidence["fresh_build"].update(status="equal", product_count=99),
+        lambda evidence: evidence["fresh_build"].update(aggregate_digest="sha256:forged"),
+        lambda evidence: evidence["fresh_build"].update(product_digests={"summary.json": "sha256:forged"}),
+        lambda evidence: evidence["legacy_delta"].update(different_count=0),
+        lambda evidence: evidence["legacy_delta"]["results"].update({"summary.json": "equal"}),
+        lambda evidence: evidence["legacy_delta"].update(legacy_aggregate_digest="sha256:forged"),
+        lambda evidence: evidence["input_closure"].update(aggregate_digest="sha256:forged"),
+        lambda evidence: evidence["input_closure"].update(status="stable", observation_count=999),
+    ],
+)
+def test_verify_runtime_rejects_forged_parity_evidence(tmp_path: Path, mutation: object) -> None:
+    documents, legacy, state, plan = _apply_seeded_runtime(tmp_path)
+    parity_path = state / "migration" / "parity.json"
+    evidence = json.loads(parity_path.read_text(encoding="utf-8"))
+    mutation(evidence)  # type: ignore[operator]
+    parity_path.write_text(json.dumps(evidence), encoding="utf-8")
+
+    with pytest.raises(PhaseBError, match="parity receipt is invalid"):
+        verify_runtime(
+            documents,
+            legacy,
+            state,
+            expected_fingerprint=plan["fingerprint"],
+        )
+
+
+def test_verify_runtime_recomputes_promoted_and_legacy_products(tmp_path: Path) -> None:
+    documents, legacy, state, plan = _apply_seeded_runtime(tmp_path)
+    (state / "generated" / "summary.json").write_text('{"value": 99}\n', encoding="utf-8")
+    with pytest.raises(PhaseBError, match="parity receipt is invalid"):
+        verify_runtime(documents, legacy, state, expected_fingerprint=plan["fingerprint"])
+
+    (state / "generated" / "summary.json").write_text('{"value": 2}\n', encoding="utf-8")
+    (legacy / "app-data" / "summary.json").write_text('{"value": 2}\n', encoding="utf-8")
+    with pytest.raises(PhaseBError, match="parity receipt is invalid"):
+        verify_runtime(documents, legacy, state, expected_fingerprint=plan["fingerprint"])
+
+
+def test_verify_runtime_rejects_tampered_bound_plan_even_with_original_expected_fingerprint(tmp_path: Path) -> None:
+    documents, legacy, state, plan = _apply_seeded_runtime(tmp_path)
+    plan_path = state / "migration" / "plan.json"
+    bound = json.loads(plan_path.read_text(encoding="utf-8"))
+    bound["manifest_count"] = 999
+    plan_path.write_text(json.dumps(bound), encoding="utf-8")
+    with pytest.raises(PhaseBError, match="runtime plan fingerprint mismatch"):
+        verify_runtime(documents, legacy, state, expected_fingerprint=plan["fingerprint"])
 
 
 def test_apply_runtime_rejects_nondeterministic_fresh_builds(tmp_path: Path) -> None:
@@ -276,7 +473,7 @@ def test_apply_runtime_cli_requires_explicit_roots_and_returns_json(
     assert json.loads(capsys.readouterr().out)["status"] == "verified"
 
 
-def test_verify_runtime_cli_loads_bound_plan(
+def test_verify_runtime_cli_requires_independent_expected_fingerprint(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -303,11 +500,245 @@ def test_verify_runtime_cli_loads_bound_plan(
             str(documents),
             "--state-root",
             str(state),
+            "--expected-fingerprint",
+            plan["fingerprint"],
             "--json",
         ]
     )
     assert result == 0
     assert json.loads(capsys.readouterr().out)["source_fingerprint"] == plan["fingerprint"]
+
+
+def test_verify_runtime_cli_rejects_missing_expected_fingerprint() -> None:
+    with pytest.raises(SystemExit):
+        phase_b.main(
+            [
+                "verify-runtime",
+                "--documents-root",
+                "/tmp/documents",
+                "--state-root",
+                "/tmp/state",
+            ]
+        )
+
+
+def test_bun_build_runner_wraps_all_build_steps_in_one_read_only_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    documents = (tmp_path / 'Documents "quoted"').resolve()
+    state = (tmp_path / "state").resolve()
+    calls: list[tuple[list[str], dict[str, str]]] = []
+    monkeypatch.setattr(phase_b.sys, "platform", "darwin")
+    monkeypatch.setattr(phase_b.os, "lstat", lambda _path: SimpleNamespace(st_mode=stat.S_IFREG | 0o755))
+
+    def fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append((command, kwargs["env"]))  # type: ignore[index]
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(phase_b.subprocess, "run", fake_run)
+    phase_b._bun_build_runner(tmp_path)(
+        {
+            "FAMILY_DOCUMENTS_ROOT": str(documents),
+            "FAMILY_DASHBOARD_STATE_ROOT": str(state),
+        }
+    )
+
+    assert [call[0][-1] for call in calls] == [
+        "scripts/verify-paths.ts",
+        "scripts/build-all.ts",
+        "scripts/verify-summary.ts",
+        "scripts/verify-domain-data.ts",
+    ]
+    assert all(call[0][:2] == ["/usr/bin/sandbox-exec", "-p"] for call in calls)
+    assert len({call[0][2] for call in calls}) == 1
+    assert f'(deny file-write* (subpath "{str(documents).replace(chr(34), chr(92) + chr(34))}"))' in calls[0][0][2]
+    assert all(set(call[1]) == {"PATH", "FAMILY_DOCUMENTS_ROOT", "FAMILY_DASHBOARD_STATE_ROOT"} for call in calls)
+
+
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+def test_bun_build_runner_fails_closed_off_darwin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    platform: str,
+) -> None:
+    monkeypatch.setattr(phase_b.sys, "platform", platform)
+    with pytest.raises(PhaseBError, match="sandbox-exec is required"):
+        phase_b._bun_build_runner(tmp_path)(
+            {
+                "FAMILY_DOCUMENTS_ROOT": str(tmp_path / "Documents"),
+                "FAMILY_DASHBOARD_STATE_ROOT": str(tmp_path / "state"),
+            }
+        )
+
+
+def test_bun_build_runner_rejects_control_characters_in_documents_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(phase_b.sys, "platform", "darwin")
+    with pytest.raises(PhaseBError, match="control character"):
+        phase_b._bun_build_runner(tmp_path)(
+            {
+                "FAMILY_DOCUMENTS_ROOT": str(tmp_path / "Documents") + "\n(alias)",
+                "FAMILY_DASHBOARD_STATE_ROOT": str(tmp_path / "state"),
+            }
+        )
+
+
+def test_bun_build_runner_rejects_empty_documents_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(phase_b.sys, "platform", "darwin")
+    monkeypatch.setattr(phase_b.os, "lstat", lambda _path: SimpleNamespace(st_mode=stat.S_IFREG | 0o755))
+    with pytest.raises(PhaseBError, match="Documents root is required"):
+        phase_b._bun_build_runner(tmp_path)(
+            {
+                "FAMILY_DOCUMENTS_ROOT": "",
+                "FAMILY_DASHBOARD_STATE_ROOT": str(tmp_path / "state"),
+            }
+        )
+
+
+def test_bun_build_runner_rejects_nonregular_sandbox_exec(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(phase_b.sys, "platform", "darwin")
+    monkeypatch.setattr(phase_b.os, "lstat", lambda _path: SimpleNamespace(st_mode=stat.S_IFDIR | 0o755))
+    with pytest.raises(PhaseBError, match="regular executable"):
+        phase_b._bun_build_runner(tmp_path)(
+            {
+                "FAMILY_DOCUMENTS_ROOT": str(tmp_path / "Documents"),
+                "FAMILY_DASHBOARD_STATE_ROOT": str(tmp_path / "state"),
+            }
+        )
+
+
+def test_bun_build_runner_rejects_absent_sandbox_exec(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(phase_b.sys, "platform", "darwin")
+    monkeypatch.setattr(phase_b.os, "lstat", lambda _path: (_ for _ in ()).throw(FileNotFoundError()))
+    with pytest.raises(PhaseBError, match="regular executable"):
+        phase_b._bun_build_runner(tmp_path)(
+            {
+                "FAMILY_DOCUMENTS_ROOT": str(tmp_path / "Documents"),
+                "FAMILY_DASHBOARD_STATE_ROOT": str(tmp_path / "state"),
+            }
+        )
+
+
+@pytest.mark.parametrize("result", [OSError("launch failed"), SimpleNamespace(returncode=1)])
+def test_bun_build_runner_rejects_failed_launch_or_invalid_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    result: object,
+) -> None:
+    monkeypatch.setattr(phase_b.sys, "platform", "darwin")
+    monkeypatch.setattr(phase_b.os, "lstat", lambda _path: SimpleNamespace(st_mode=stat.S_IFREG | 0o755))
+
+    def failed_run(*_args: object, **_kwargs: object) -> object:
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    monkeypatch.setattr(phase_b.subprocess, "run", failed_run)
+    with pytest.raises(PhaseBError, match="sandboxed build (launch|step) failed"):
+        phase_b._bun_build_runner(tmp_path)(
+            {
+                "FAMILY_DOCUMENTS_ROOT": str(tmp_path / "Documents"),
+                "FAMILY_DASHBOARD_STATE_ROOT": str(tmp_path / "state"),
+            }
+        )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires macOS sandbox-exec")
+def test_real_macos_sandboxed_build_child_cannot_write_documents_root(tmp_path: Path) -> None:
+    documents = tmp_path / 'Documents "quoted"'
+    state = tmp_path / "state"
+    fake_bin = tmp_path / "bin"
+    documents.mkdir()
+    state.mkdir()
+    fake_bin.mkdir()
+    bun = fake_bin / "bun"
+    bun.write_text('#!/bin/sh\nprintf blocked > "$FAMILY_DOCUMENTS_ROOT/forbidden"\n', encoding="utf-8")
+    bun.chmod(0o755)
+    original_path = os.environ.get("PATH", "")
+    os.environ["PATH"] = f"{fake_bin}:{original_path}"
+    try:
+        with pytest.raises(PhaseBError, match="sandboxed build step failed"):
+            phase_b._bun_build_runner(tmp_path)(
+                {
+                    "FAMILY_DOCUMENTS_ROOT": str(documents),
+                    "FAMILY_DASHBOARD_STATE_ROOT": str(state),
+                }
+            )
+    finally:
+        os.environ["PATH"] = original_path
+    assert not (documents / "forbidden").exists()
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or shutil.which("bun") is None,
+    reason="requires macOS sandbox-exec and Bun",
+)
+def test_real_macos_sandboxed_bun_build_runs_existing_verifiers(tmp_path: Path) -> None:
+    documents = tmp_path / "synthetic-documents"
+    state = tmp_path / "synthetic-state"
+    manifests = state / "manifests"
+    for tree in (
+        "_knowledge/01.成员档案",
+        "_knowledge/02.医疗健康",
+        "_knowledge/03.育儿成长",
+        "_knowledge/04.家庭日常",
+        "_knowledge/05.资产设备",
+        "_archive",
+        "_control",
+    ):
+        (documents / tree).mkdir(parents=True, exist_ok=True)
+    for relative_path in (
+        "_knowledge/03.育儿成长/规划文档/爱蓓乐托育计划.md",
+        "_knowledge/04.家庭日常/01.健康管理/宠物/2026-05-31猫咪行为调整方案.md",
+        "_knowledge/00.规则与模板/家庭账目规则.md",
+        "_knowledge/04.家庭日常/04.家庭财务/README.md",
+        "_knowledge/04.家庭日常/04.家庭财务/物业费_2026-2027.md",
+        "_knowledge/04.家庭日常/05.理财/README.md",
+    ):
+        source = documents / relative_path
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("# Synthetic fixture\n", encoding="utf-8")
+    manifests.mkdir(parents=True)
+    for name in ("summary", "members", "health", "growth", "daily", "assets"):
+        (manifests / f"{name}.yaml").write_text("{}\n", encoding="utf-8")
+    (documents / "_control" / "STATUS.md").write_text("## 当前状态：BUSY\n", encoding="utf-8")
+    (documents / "_control" / "STATE.md").write_text(
+        "---\nlast-reviewed: 2026-07-02\n---\n| 当前阶段 | **本地物理整合完成** |\n",
+        encoding="utf-8",
+    )
+    (documents / "_control" / "signals.md").write_text(
+        "---\nsignals:\n  - type: INFO\n    message: synthetic signal\n---\n",
+        encoding="utf-8",
+    )
+    (documents / "_control" / "TIMELINE.md").write_text(
+        "## 2026 年\n| 日期 | 事件 | 说明 | 类型 | 来源 |\n"
+        "|---|---|---|---|---|\n"
+        "| 2026-09-01 | Synthetic update | fixture | test | synthetic |\n",
+        encoding="utf-8",
+    )
+
+    app_root = Path(__file__).resolve().parents[1] / "apps" / "dashboard"
+    phase_b._bun_build_runner(app_root)(
+        {
+            "FAMILY_DOCUMENTS_ROOT": str(documents),
+            "FAMILY_DASHBOARD_STATE_ROOT": str(state),
+        }
+    )
+
+    assert (state / "generated" / "summary.json").is_file()
+    assert all((state / "generated" / f"{name}.json").is_file() for name in runtime.MANIFEST_NAMES[1:])
 
 
 def _approved_proposal(

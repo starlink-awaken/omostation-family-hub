@@ -24,6 +24,27 @@ VOLATILE_FIELDS_BY_PRODUCT: Final = {
     "daily.json": frozenset({"updatedAt", "generatedAt"}),
     "assets.json": frozenset({"updatedAt", "generatedAt"}),
 }
+PRODUCT_ROOT_SCHEMAS: Final = {
+    "assets.json": dict,
+    "build-meta.json": dict,
+    "calendar.json": dict,
+    "daily.json": dict,
+    "finance.json": dict,
+    "growth.json": dict,
+    "health.json": dict,
+    "links.json": dict,
+    "members.json": dict,
+    "milestones.json": dict,
+    "search-chunks-embeddings.json": list,
+    "search-chunks.json": list,
+    "search-embeddings.json": list,
+    "search-index.json": list,
+    "summary.json": dict,
+    "tags.json": dict,
+    "tasks.json": list,
+    "timeline.json": list,
+    "vaccines.json": dict,
+}
 BuildRunner = Callable[[dict[str, str]], None]
 
 
@@ -44,12 +65,12 @@ def _sha(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _entry(path: Path, base: Path) -> dict[str, Any]:
+def _entry(path: Path, logical_path: str) -> dict[str, Any]:
     stat = path.stat(follow_symlinks=False)
     if not path.is_file() or path.is_symlink():
         raise PhaseBError("inventory contains a non-regular node")
     return {
-        "relative_path": path.relative_to(base).as_posix(),
+        "path_digest": "sha256:" + hashlib.sha256(logical_path.encode()).hexdigest(),
         "sha256": _sha(path),
         "bytes": stat.st_size,
         "mode": oct(stat.st_mode & 0o7777),
@@ -58,6 +79,11 @@ def _entry(path: Path, base: Path) -> dict[str, Any]:
 
 def _fingerprint(entries: list[dict[str, Any]]) -> str:
     raw = json.dumps(entries, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _canonical_digest(payload: Any) -> str:
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -115,10 +141,15 @@ def _strip_declared_fields(value: Any, fields: frozenset[str]) -> Any:
 
 
 def normalized_product_digest(path: Path) -> str:
+    root_schema = PRODUCT_ROOT_SCHEMAS.get(path.name)
+    if root_schema is None:
+        raise PhaseBError(f"unknown product: {path.name}")
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise PhaseBError(f"product is unreadable or malformed: {path.name}") from exc
+    if not isinstance(value, root_schema):
+        raise PhaseBError(f"product root schema mismatch: {path.name}")
     normalized = _strip_declared_fields(
         value,
         VOLATILE_FIELDS_BY_PRODUCT.get(path.name, frozenset()),
@@ -128,12 +159,19 @@ def normalized_product_digest(path: Path) -> str:
 
 
 def product_digest_map(directory: Path) -> dict[str, str]:
+    if directory.is_symlink() or not directory.is_dir():
+        raise PhaseBError("product directory must be a regular directory")
     products = sorted(directory.glob("*.json"))
     if not products:
         raise PhaseBError("generated product set is empty")
     if any(path.is_symlink() or not path.is_file() for path in products):
         raise PhaseBError("product set contains a non-regular node")
     return {path.name: normalized_product_digest(path) for path in products}
+
+
+def canonical_plan_fingerprint(plan: dict[str, Any]) -> str:
+    payload = {key: value for key, value in plan.items() if key != "fingerprint"}
+    return _canonical_digest(payload)
 
 
 def plan_runtime(documents_root: Path, legacy_app_root: Path, state_root: Path) -> dict[str, Any]:
@@ -154,16 +192,13 @@ def plan_runtime(documents_root: Path, legacy_app_root: Path, state_root: Path) 
         if not isinstance(yaml.safe_load(path.read_text(encoding="utf-8")), dict):
             raise PhaseBError("manifest must be a mapping")
     generated_root = legacy / "app-data"
-    generated = sorted(path for path in generated_root.glob("*.json") if path.is_file() and not path.is_symlink())
-    entries = [_entry(path, legacy) for path in [*manifests, *generated]]
-    input_closure = builder_input_closure(documents, legacy)
-    fingerprint_entries = [
-        *entries,
-        {
-            "input_closure_digest": input_closure["aggregate_digest"],
-            "input_closure_file_count": input_closure["file_count"],
-        },
+    legacy_products = product_digest_map(generated_root)
+    generated = [generated_root / name for name in legacy_products]
+    entries = [
+        *(_entry(path, f"manifest:{path.stem}") for path in manifests),
+        *(_entry(path, f"legacy-product:{path.stem}") for path in generated),
     ]
+    input_closure = builder_input_closure(documents, legacy)
     disk_probe = target.parent
     while not disk_probe.exists() and disk_probe != disk_probe.parent:
         disk_probe = disk_probe.parent
@@ -175,7 +210,7 @@ def plan_runtime(documents_root: Path, legacy_app_root: Path, state_root: Path) 
     )
     if shutil.disk_usage(disk_probe).free < required_bytes:
         raise PhaseBError("insufficient disk for runtime staging")
-    return {
+    plan: dict[str, Any] = {
         "schema": PLAN_SCHEMA,
         "status": "planned",
         "state_root_ref": "runtime://family-hub/dashboard",
@@ -184,15 +219,18 @@ def plan_runtime(documents_root: Path, legacy_app_root: Path, state_root: Path) 
         "required_free_bytes": required_bytes,
         "entries": entries,
         "input_closure": input_closure,
-        "fingerprint": _fingerprint(fingerprint_entries),
         "writes_documents": False,
     }
+    plan["fingerprint"] = canonical_plan_fingerprint(plan)
+    return plan
 
 
 def plan_fingerprint(plan: dict[str, Any]) -> str:
     value = plan.get("fingerprint")
     if plan.get("schema") != PLAN_SCHEMA or not isinstance(value, str):
         raise PhaseBError("runtime plan is invalid")
+    if value != canonical_plan_fingerprint(plan):
+        raise PhaseBError("runtime plan fingerprint mismatch")
     return value
 
 
@@ -228,6 +266,48 @@ def _seed_staging(staging: Path, legacy_app_root: Path, plan: dict[str, Any]) ->
 def _mapping_digest(mapping: dict[str, str]) -> str:
     raw = json.dumps(mapping, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _parity_evidence(
+    input_closure: dict[str, Any],
+    fresh_products: dict[str, str],
+    legacy_products: dict[str, str],
+) -> dict[str, Any]:
+    if legacy_products.keys() != fresh_products.keys():
+        raise PhaseBError("legacy product set differs")
+    product_set = sorted(fresh_products)
+    legacy_results = {
+        name: "equal" if legacy_products[name] == fresh_products[name] else "different" for name in product_set
+    }
+    fresh_digest = _mapping_digest(fresh_products)
+    evidence: dict[str, Any] = {
+        "schema": "family-dashboard-parity/v2",
+        "input_closure": {
+            "status": "stable",
+            "aggregate_digest": input_closure["aggregate_digest"],
+            "file_count": input_closure["file_count"],
+            "observation_count": 3,
+        },
+        "fresh_build": {
+            "status": "equal",
+            "product_count": len(fresh_products),
+            "product_set": product_set,
+            "product_digests": fresh_products,
+            "aggregate_digest": fresh_digest,
+        },
+        "legacy_delta": {
+            "status": "observed",
+            "product_count": len(legacy_products),
+            "equal_count": sum(value == "equal" for value in legacy_results.values()),
+            "different_count": sum(value == "different" for value in legacy_results.values()),
+            "legacy_product_digests": legacy_products,
+            "legacy_aggregate_digest": _mapping_digest(legacy_products),
+            "fresh_aggregate_digest": fresh_digest,
+            "results": legacy_results,
+        },
+    }
+    evidence["evidence_digest"] = _canonical_digest(evidence)
+    return evidence
 
 
 def _assert_input_closure(
@@ -289,30 +369,7 @@ def apply_runtime(
             raise PhaseBError(f"fresh build parity differs: {','.join(fresh_differences)}")
 
         legacy = product_digest_map(legacy_app_root / "app-data")
-        if legacy.keys() != fresh_a.keys():
-            raise PhaseBError("legacy product set differs")
-        legacy_results = {name: "equal" if legacy[name] == fresh_a[name] else "different" for name in sorted(fresh_a)}
-        parity = {
-            "schema": "family-dashboard-parity/v2",
-            "input_closure": {
-                "status": "stable",
-                "aggregate_digest": expected_closure["aggregate_digest"],
-                "observation_count": 3,
-            },
-            "fresh_build": {
-                "status": "equal",
-                "product_count": len(fresh_a),
-                "aggregate_digest": _mapping_digest(fresh_a),
-            },
-            "legacy_delta": {
-                "status": "observed",
-                "equal_count": sum(value == "equal" for value in legacy_results.values()),
-                "different_count": sum(value == "different" for value in legacy_results.values()),
-                "legacy_aggregate_digest": _mapping_digest(legacy),
-                "fresh_aggregate_digest": _mapping_digest(fresh_a),
-                "results": legacy_results,
-            },
-        }
+        parity = _parity_evidence(expected_closure, fresh_a, legacy)
         _atomic_json(staging_a / "migration" / "parity.json", parity)
         shutil.rmtree(staging_b)
         staging_a.chmod(0o700)
@@ -359,7 +416,8 @@ def verify_runtime(
         raise PhaseBError("bound runtime plan is invalid") from exc
     if plan_fingerprint(bound_plan) != expected_fingerprint:
         raise PhaseBError("bound runtime plan is invalid")
-    if builder_input_closure(documents_root, legacy_app_root) != bound_plan.get("input_closure"):
+    current_closure = builder_input_closure(documents_root, legacy_app_root)
+    if current_closure != bound_plan.get("input_closure"):
         raise PhaseBError("Documents builder input closure changed")
 
     parity_path = target / "migration" / "parity.json"
@@ -367,14 +425,11 @@ def verify_runtime(
         parity = json.loads(parity_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise PhaseBError("parity receipt is invalid") from exc
-    if parity.get("schema") != "family-dashboard-parity/v2":
+    promoted_products = product_digest_map(target / "generated")
+    legacy_products = product_digest_map(legacy_app_root / "app-data")
+    expected_parity = _parity_evidence(current_closure, promoted_products, legacy_products)
+    if parity != expected_parity:
         raise PhaseBError("parity receipt is invalid")
-    if parity.get("input_closure", {}).get("status") != "stable":
-        raise PhaseBError("input closure is not stable")
-    if parity.get("fresh_build", {}).get("status") != "equal":
-        raise PhaseBError("fresh build parity is not equal")
-    if parity.get("legacy_delta", {}).get("status") != "observed":
-        raise PhaseBError("legacy delta is missing")
     return {
         "schema": "family-dashboard-runtime-receipt/v1",
         "status": "verified",
