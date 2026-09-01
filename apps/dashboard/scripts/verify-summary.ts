@@ -1,6 +1,12 @@
 import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { statePath } from "../src/lib/paths";
+import {
+  parseCurrentPhase,
+  parseCurrentStatus,
+  parseLastReviewed,
+  readSsotFile,
+} from "./builders/common";
 
 type SummaryJson = {
   meta?: {
@@ -38,14 +44,18 @@ function isIsoDateTime(input: string | undefined): boolean {
 
 async function main() {
   const summaryPath = statePath("generated", "summary.json");
-  const summary = await readJson(summaryPath);
+  const [summary, statusMd, stateMd] = await Promise.all([
+    readJson(summaryPath),
+    readSsotFile("_control/STATUS.md"),
+    readSsotFile("_control/STATE.md"),
+  ]);
 
   assert.equal(summary.meta?.schemaVersion, "v1");
   assert.ok(isIsoDateTime(summary.meta?.generatedAt), "meta.generatedAt 必须是 ISO 时间");
 
-  assert.equal(summary.overview?.current, "BUSY");
-  assert.equal(summary.overview?.phase, "本地物理整合完成");
-  assert.equal(summary.overview?.lastUpdated, "2026-07-02");
+  assert.equal(summary.overview?.current, parseCurrentStatus(statusMd));
+  assert.equal(summary.overview?.phase, parseCurrentPhase(stateMd));
+  assert.equal(summary.overview?.lastUpdated, parseLastReviewed(stateMd));
 
   assert.ok(summary.entries?.primary, "必须存在主入口");
   assert.equal(summary.entries?.primary?.href, "/members");
