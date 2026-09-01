@@ -13,6 +13,17 @@ import yaml
 
 PLAN_SCHEMA: Final = "family-dashboard-runtime-plan/v1"
 MANIFEST_NAMES: Final = ("summary", "members", "health", "growth", "daily", "assets")
+INPUT_CLOSURE_SCHEMA: Final = "family-dashboard-input-closure/v1"
+INPUT_TREE_NAMES: Final = ("_knowledge", "_archive", "_control")
+VOLATILE_FIELDS_BY_PRODUCT: Final = {
+    "build-meta.json": frozenset({"builtAt"}),
+    "summary.json": frozenset({"updatedAt", "generatedAt"}),
+    "members.json": frozenset({"updatedAt", "generatedAt"}),
+    "health.json": frozenset({"updatedAt", "generatedAt"}),
+    "growth.json": frozenset({"updatedAt", "generatedAt"}),
+    "daily.json": frozenset({"updatedAt", "generatedAt"}),
+    "assets.json": frozenset({"updatedAt", "generatedAt"}),
+}
 BuildRunner = Callable[[dict[str, str]], None]
 
 
@@ -50,6 +61,81 @@ def _fingerprint(entries: list[dict[str, Any]]) -> str:
     return "sha256:" + hashlib.sha256(raw.encode()).hexdigest()
 
 
+def _pathless_entry(path: Path, logical_path: str) -> dict[str, Any]:
+    metadata = path.stat(follow_symlinks=False)
+    if path.is_symlink() or not path.is_file():
+        raise PhaseBError("builder input closure contains a non-regular node")
+    return {
+        "path_digest": "sha256:" + hashlib.sha256(logical_path.encode()).hexdigest(),
+        "sha256": _sha(path),
+        "bytes": metadata.st_size,
+        "mode": oct(metadata.st_mode & 0o7777),
+    }
+
+
+def builder_input_closure(documents_root: Path, legacy_app_root: Path) -> dict[str, Any]:
+    documents = _regular_root(documents_root, "Documents root")
+    legacy = _regular_root(legacy_app_root, "legacy app root")
+    candidates: list[tuple[Path, str]] = [
+        (
+            legacy / "data-manifest" / f"{name}.yaml",
+            f"legacy-manifest/{name}.yaml",
+        )
+        for name in MANIFEST_NAMES
+    ]
+    for tree_name in INPUT_TREE_NAMES:
+        tree = documents / tree_name
+        if tree.is_symlink() or not tree.is_dir():
+            raise PhaseBError(f"builder input root is invalid: {tree_name}")
+        for node in sorted(tree.rglob("*"), key=lambda item: item.relative_to(documents).as_posix()):
+            if node.is_symlink():
+                raise PhaseBError("builder input closure contains a symlink")
+            if node.is_file():
+                candidates.append((node, f"documents/{node.relative_to(documents).as_posix()}"))
+            elif not node.is_dir():
+                raise PhaseBError("builder input closure contains a non-regular node")
+    entries = sorted(
+        (_pathless_entry(path, logical) for path, logical in candidates),
+        key=lambda item: item["path_digest"],
+    )
+    return {
+        "schema": INPUT_CLOSURE_SCHEMA,
+        "file_count": len(entries),
+        "aggregate_digest": _fingerprint(entries),
+        "entries": entries,
+    }
+
+
+def _strip_declared_fields(value: Any, fields: frozenset[str]) -> Any:
+    if isinstance(value, dict):
+        return {key: _strip_declared_fields(item, fields) for key, item in value.items() if key not in fields}
+    if isinstance(value, list):
+        return [_strip_declared_fields(item, fields) for item in value]
+    return value
+
+
+def normalized_product_digest(path: Path) -> str:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise PhaseBError(f"product is unreadable or malformed: {path.name}") from exc
+    normalized = _strip_declared_fields(
+        value,
+        VOLATILE_FIELDS_BY_PRODUCT.get(path.name, frozenset()),
+    )
+    raw = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(raw.encode()).hexdigest()
+
+
+def product_digest_map(directory: Path) -> dict[str, str]:
+    products = sorted(directory.glob("*.json"))
+    if not products:
+        raise PhaseBError("generated product set is empty")
+    if any(path.is_symlink() or not path.is_file() for path in products):
+        raise PhaseBError("product set contains a non-regular node")
+    return {path.name: normalized_product_digest(path) for path in products}
+
+
 def plan_runtime(documents_root: Path, legacy_app_root: Path, state_root: Path) -> dict[str, Any]:
     documents = _regular_root(documents_root, "Documents root")
     legacy = _regular_root(legacy_app_root, "legacy app root")
@@ -70,10 +156,23 @@ def plan_runtime(documents_root: Path, legacy_app_root: Path, state_root: Path) 
     generated_root = legacy / "app-data"
     generated = sorted(path for path in generated_root.glob("*.json") if path.is_file() and not path.is_symlink())
     entries = [_entry(path, legacy) for path in [*manifests, *generated]]
+    input_closure = builder_input_closure(documents, legacy)
+    fingerprint_entries = [
+        *entries,
+        {
+            "input_closure_digest": input_closure["aggregate_digest"],
+            "input_closure_file_count": input_closure["file_count"],
+        },
+    ]
     disk_probe = target.parent
     while not disk_probe.exists() and disk_probe != disk_probe.parent:
         disk_probe = disk_probe.parent
-    required_bytes = sum(int(entry["bytes"]) for entry in entries) * 2 + 64 * 1024 * 1024
+    required_bytes = (
+        sum(int(entry["bytes"]) for entry in entries)
+        + 2 * sum(int(entry["bytes"]) for entry in input_closure["entries"])
+        + 2 * sum(int(entry["bytes"]) for entry in entries)
+        + 64 * 1024 * 1024
+    )
     if shutil.disk_usage(disk_probe).free < required_bytes:
         raise PhaseBError("insufficient disk for runtime staging")
     return {
@@ -84,7 +183,8 @@ def plan_runtime(documents_root: Path, legacy_app_root: Path, state_root: Path) 
         "legacy_generated_count": len(generated),
         "required_free_bytes": required_bytes,
         "entries": entries,
-        "fingerprint": _fingerprint(entries),
+        "input_closure": input_closure,
+        "fingerprint": _fingerprint(fingerprint_entries),
         "writes_documents": False,
     }
 
@@ -111,22 +211,6 @@ def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
     except BaseException:
         temporary_path.unlink(missing_ok=True)
         raise
-
-
-def _normalized_json(path: Path) -> Any:
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if path.name == "build-meta.json" and isinstance(value, dict):
-        value = {key: item for key, item in value.items() if key != "builtAt"}
-    if path.name in {
-        "summary.json",
-        "members.json",
-        "health.json",
-        "growth.json",
-        "daily.json",
-        "assets.json",
-    } and isinstance(value, dict):
-        value = {key: item for key, item in value.items() if key != "updatedAt"}
-    return value
 
 
 def apply_runtime(
@@ -173,7 +257,9 @@ def apply_runtime(
             if not generated_path.is_file():
                 raise PhaseBError(f"generated product missing: {legacy_path.name}")
             parity[legacy_path.name] = (
-                "equal" if _normalized_json(legacy_path) == _normalized_json(generated_path) else "different"
+                "equal"
+                if normalized_product_digest(legacy_path) == normalized_product_digest(generated_path)
+                else "different"
             )
         _atomic_json(
             staging / "migration" / "parity.json",
@@ -214,8 +300,8 @@ def verify_runtime(
     if [path.stem for path in manifests] != sorted(MANIFEST_NAMES):
         raise PhaseBError("manifest set mismatch")
     verification_target = target.parent / "verification-absent"
-    source_entries = plan_runtime(documents_root, legacy_app_root, verification_target)["entries"]
-    if _fingerprint(source_entries) != expected_fingerprint:
+    source_plan = plan_runtime(documents_root, legacy_app_root, verification_target)
+    if plan_fingerprint(source_plan) != expected_fingerprint:
         raise PhaseBError("Documents source fingerprint changed")
     return {
         "schema": "family-dashboard-runtime-receipt/v1",

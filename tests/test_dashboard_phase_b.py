@@ -13,6 +13,16 @@ from family_hub.dashboard_mutation import build_canary_proposal, execute_approve
 from family_hub.dashboard_runtime import PhaseBError, apply_runtime, plan_runtime
 
 
+def _seed_builder_input_trees(documents: Path) -> None:
+    for name in ("_knowledge", "_archive", "_control"):
+        tree = documents / name
+        tree.mkdir(parents=True)
+        (tree / f"{name.removeprefix('_')}.md").write_text(
+            f"# {name}\n",
+            encoding="utf-8",
+        )
+
+
 def _seed_runtime_source(tmp_path: Path) -> tuple[Path, Path, Path]:
     documents = tmp_path / "Documents" / "family"
     legacy = documents / "family-dashboard-app"
@@ -23,6 +33,7 @@ def _seed_runtime_source(tmp_path: Path) -> tuple[Path, Path, Path]:
     for name in ("summary", "members", "health", "growth", "daily", "assets"):
         (manifests / f"{name}.yaml").write_text(f"title: {name}\n", encoding="utf-8")
     (generated / "summary.json").write_text('{"value": 1}\n', encoding="utf-8")
+    _seed_builder_input_trees(documents)
     state = tmp_path / "Workspace" / "runtime" / "family-hub" / "dashboard"
     return documents, legacy, state
 
@@ -51,6 +62,58 @@ def test_runtime_plan_rejects_insufficient_disk(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setattr(runtime.shutil, "disk_usage", lambda _path: SimpleNamespace(free=0))
     with pytest.raises(PhaseBError, match="insufficient disk"):
         plan_runtime(documents, legacy, state)
+
+
+def test_runtime_plan_binds_pathless_builder_input_closure(tmp_path: Path) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+
+    first = plan_runtime(documents, legacy, state)
+    closure = first["input_closure"]
+    encoded = json.dumps(closure, ensure_ascii=False, sort_keys=True)
+
+    assert closure["schema"] == "family-dashboard-input-closure/v1"
+    assert closure["file_count"] == 9
+    assert closure["aggregate_digest"].startswith("sha256:")
+    assert "_knowledge" not in encoded
+    assert str(documents) not in encoded
+
+    (documents / "_knowledge" / "knowledge.md").write_text(
+        "# changed\n",
+        encoding="utf-8",
+    )
+    second = plan_runtime(documents, legacy, state)
+    assert second["input_closure"]["aggregate_digest"] != closure["aggregate_digest"]
+    assert second["fingerprint"] != first["fingerprint"]
+
+
+def test_runtime_plan_rejects_symlink_inside_builder_input(tmp_path: Path) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    link = documents / "_knowledge" / "linked-control.md"
+    link.symlink_to(documents / "_control" / "control.md")
+
+    with pytest.raises(PhaseBError, match="builder input closure contains a symlink"):
+        plan_runtime(documents, legacy, state)
+
+
+def test_normalized_product_digest_removes_only_declared_fields(tmp_path: Path) -> None:
+    first = tmp_path / "summary.json"
+    second = tmp_path / "other" / "summary.json"
+    second.parent.mkdir()
+    first.write_text(
+        '{"meta":{"generatedAt":"first"},"updatedAt":"first","value":1}\n',
+        encoding="utf-8",
+    )
+    second.write_text(
+        '{"meta":{"generatedAt":"second"},"updatedAt":"second","value":1}\n',
+        encoding="utf-8",
+    )
+    assert runtime.normalized_product_digest(first) == runtime.normalized_product_digest(second)
+
+    second.write_text(
+        '{"meta":{"generatedAt":"second"},"updatedAt":"second","value":2}\n',
+        encoding="utf-8",
+    )
+    assert runtime.normalized_product_digest(first) != runtime.normalized_product_digest(second)
 
 
 def test_apply_runtime_builds_in_staging_and_promotes_atomically(tmp_path: Path) -> None:
