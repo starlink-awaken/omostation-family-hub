@@ -157,16 +157,50 @@ def test_apply_runtime_failure_removes_staging_and_preserves_source(tmp_path: Pa
     assert (legacy / "data-manifest" / "summary.yaml").read_bytes() == before
 
 
-def test_apply_runtime_parity_difference_names_product_and_does_not_promote(tmp_path: Path) -> None:
+def test_apply_runtime_promotes_equal_fresh_builds_and_records_legacy_delta(tmp_path: Path) -> None:
     documents, legacy, state = _seed_runtime_source(tmp_path)
     plan = plan_runtime(documents, legacy, state)
 
     def build(env: dict[str, str]) -> None:
         generated = Path(env["FAMILY_DASHBOARD_STATE_ROOT"]) / "generated"
         generated.mkdir(parents=True)
-        (generated / "summary.json").write_text('{"value": 2}\n', encoding="utf-8")
+        (generated / "summary.json").write_text(
+            '{"updatedAt":"volatile","value":2}\n',
+            encoding="utf-8",
+        )
 
-    with pytest.raises(PhaseBError, match="normalized parity differs: summary.json"):
+    receipt = apply_runtime(
+        plan,
+        documents_root=documents,
+        legacy_app_root=legacy,
+        state_root=state,
+        expected_fingerprint=plan["fingerprint"],
+        build_runner=build,
+    )
+    parity = json.loads((state / "migration" / "parity.json").read_text())
+    assert receipt["fresh_build_parity"] == "equal"
+    assert receipt["legacy_delta_status"] == "observed"
+    assert receipt["legacy_delta_count"] == 1
+    assert parity["legacy_delta"]["results"] == {"summary.json": "different"}
+    assert not list(state.parent.glob(".dashboard.staging-*"))
+
+
+def test_apply_runtime_rejects_nondeterministic_fresh_builds(tmp_path: Path) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    plan = plan_runtime(documents, legacy, state)
+    calls = 0
+
+    def build(env: dict[str, str]) -> None:
+        nonlocal calls
+        calls += 1
+        generated = Path(env["FAMILY_DASHBOARD_STATE_ROOT"]) / "generated"
+        generated.mkdir(parents=True)
+        (generated / "summary.json").write_text(
+            json.dumps({"value": calls}) + "\n",
+            encoding="utf-8",
+        )
+
+    with pytest.raises(PhaseBError, match="fresh build parity differs: summary.json"):
         apply_runtime(
             plan,
             documents_root=documents,
@@ -177,6 +211,35 @@ def test_apply_runtime_parity_difference_names_product_and_does_not_promote(tmp_
         )
     assert not state.exists()
     assert not list(state.parent.glob(".dashboard.staging-*"))
+
+
+def test_apply_runtime_rejects_input_drift_between_builds(tmp_path: Path) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    plan = plan_runtime(documents, legacy, state)
+    calls = 0
+
+    def build(env: dict[str, str]) -> None:
+        nonlocal calls
+        calls += 1
+        generated = Path(env["FAMILY_DASHBOARD_STATE_ROOT"]) / "generated"
+        generated.mkdir(parents=True)
+        (generated / "summary.json").write_text('{"value":1}\n', encoding="utf-8")
+        if calls == 1:
+            (documents / "_knowledge" / "knowledge.md").write_text(
+                "# drifted during migration\n",
+                encoding="utf-8",
+            )
+
+    with pytest.raises(PhaseBError, match="builder input closure changed"):
+        apply_runtime(
+            plan,
+            documents_root=documents,
+            legacy_app_root=legacy,
+            state_root=state,
+            expected_fingerprint=plan["fingerprint"],
+            build_runner=build,
+        )
+    assert not state.exists()
 
 
 def test_apply_runtime_cli_requires_explicit_roots_and_returns_json(
