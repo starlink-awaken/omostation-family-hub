@@ -54,6 +54,29 @@ bun --cwd apps/dashboard run build
 bun --cwd apps/dashboard run test:e2e
 ```
 
+## Partial Runtime Recovery
+
+`recover-runtime` is an operator-only repair path for a partially purged
+runtime target. It refuses any target that already contains a bound
+`migration/plan.json`, computes the current source plan before moving state,
+and atomically restores the original partial target if rebuilding or task-data
+comparison fails. It never writes Documents.
+
+```bash
+uv run python -m family_hub.dashboard_phase_b recover-runtime \
+  --documents-root "$FAMILY_DOCUMENTS_ROOT" \
+  --legacy-app-root "$FAMILY_DOCUMENTS_ROOT/family-dashboard-app" \
+  --state-root "$FAMILY_DASHBOARD_STATE_ROOT" \
+  --expected-fingerprint "$EXPECTED_FINGERPRINT" \
+  --app-root "$PWD/apps/dashboard" \
+  --json
+```
+
+On success the original partial target remains in a private sibling
+`.dashboard.recovery-*` package and canonical state records a recovery receipt.
+Do not use this command for a valid runtime target or as a substitute for the
+separate Documents write-canary approval.
+
 ## Documentation
 
     - Developer guide: [`AGENTS.md`](AGENTS.md)

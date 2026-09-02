@@ -17,6 +17,7 @@ from .dashboard_runtime import (
     apply_runtime,
     plan_fingerprint,
     plan_runtime,
+    recover_runtime,
     verify_runtime,
 )
 
@@ -112,6 +113,14 @@ def main(argv: list[str] | None = None) -> int:
     apply.add_argument("--app-root", type=Path, required=True)
     apply.add_argument("--json", action="store_true")
 
+    recover = sub.add_parser("recover-runtime")
+    recover.add_argument("--documents-root", type=Path, required=True)
+    recover.add_argument("--legacy-app-root", type=Path, required=True)
+    recover.add_argument("--state-root", type=Path, required=True)
+    recover.add_argument("--expected-fingerprint", required=True)
+    recover.add_argument("--app-root", type=Path, required=True)
+    recover.add_argument("--json", action="store_true")
+
     verify = sub.add_parser("verify-runtime")
     verify.add_argument("--documents-root", type=Path, required=True)
     verify.add_argument("--state-root", type=Path, required=True)
@@ -172,6 +181,16 @@ def main(argv: list[str] | None = None) -> int:
             build_runner=_bun_build_runner(args.app_root),
         )
         _emit(receipt, as_json=args.json, default_key="source_fingerprint")
+        return 0
+    if args.command == "recover-runtime":
+        receipt = recover_runtime(
+            args.documents_root,
+            args.legacy_app_root,
+            args.state_root,
+            expected_fingerprint=args.expected_fingerprint,
+            build_runner=_bun_build_runner(args.app_root),
+        )
+        _emit(receipt, as_json=args.json, default_key="status")
         return 0
     bound_plan = _load_bound_plan(args.state_root)
     plan_fingerprint(bound_plan)

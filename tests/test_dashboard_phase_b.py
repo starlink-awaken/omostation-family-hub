@@ -551,6 +551,136 @@ def test_apply_runtime_existing_target_collision_is_preserved(tmp_path: Path) ->
     assert marker.read_text(encoding="utf-8") == "owned elsewhere\n"
 
 
+def test_recover_runtime_quarantines_partial_target_and_preserves_matching_tasks(tmp_path: Path) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    (legacy / "app-data" / "tasks.json").write_text(
+        '[{"id":"task-1","done":false}]\n',
+        encoding="utf-8",
+    )
+    plan = plan_runtime(documents, legacy, state)
+    partial_tasks = state / "generated" / "tasks.json"
+    partial_tasks.parent.mkdir(parents=True)
+    partial_tasks.write_text('[{"id":"task-1","done":false}]\n', encoding="utf-8")
+    (state / "migration").mkdir()
+    (state / "migration" / "server-canary.log").write_text("owned log\n", encoding="utf-8")
+    original_tasks_digest = runtime._sha(partial_tasks)
+
+    def build(env: dict[str, str]) -> None:
+        generated = Path(env["FAMILY_DASHBOARD_STATE_ROOT"]) / "generated"
+        generated.mkdir(parents=True)
+        (generated / "summary.json").write_text('{"value": 1}\n', encoding="utf-8")
+        (generated / "tasks.json").write_text(
+            '[{"id":"task-1","done":false}]\n',
+            encoding="utf-8",
+        )
+
+    receipt = runtime.recover_runtime(
+        documents,
+        legacy,
+        state,
+        expected_fingerprint=plan["fingerprint"],
+        build_runner=build,
+    )
+
+    recovery_roots = list(state.parent.glob(".dashboard.recovery-*"))
+    assert receipt["status"] == "recovered"
+    assert receipt["preserved_tasks"]["status"] == "equal"
+    assert runtime._sha(state / "generated" / "tasks.json") == original_tasks_digest
+    assert len(recovery_roots) == 1
+    assert runtime._sha(recovery_roots[0] / "generated" / "tasks.json") == original_tasks_digest
+    assert verify_runtime(documents, legacy, state, expected_fingerprint=plan["fingerprint"])["status"] == "verified"
+
+
+def test_recover_runtime_rejects_an_empty_target_without_moving_it(tmp_path: Path) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    plan = plan_runtime(documents, legacy, state)
+    state.mkdir(parents=True)
+
+    with pytest.raises(PhaseBError, match="partial runtime target is empty"):
+        runtime.recover_runtime(
+            documents,
+            legacy,
+            state,
+            expected_fingerprint=plan["fingerprint"],
+            build_runner=lambda _env: None,
+        )
+
+    assert state.exists()
+    assert not list(state.parent.glob(".dashboard.recovery-*"))
+
+
+def test_recover_runtime_restores_partial_target_when_rebuild_fails(tmp_path: Path) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    plan = plan_runtime(documents, legacy, state)
+    marker = state / "migration" / "partial.log"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("preserve me\n", encoding="utf-8")
+
+    def fail_build(_env: dict[str, str]) -> None:
+        raise OSError("injected rebuild failure")
+
+    with pytest.raises(PhaseBError, match="build failed"):
+        runtime.recover_runtime(
+            documents,
+            legacy,
+            state,
+            expected_fingerprint=plan["fingerprint"],
+            build_runner=fail_build,
+        )
+
+    assert marker.read_text(encoding="utf-8") == "preserve me\n"
+    assert not list(state.parent.glob(".dashboard.recovery-*"))
+
+
+def test_recover_runtime_refuses_an_existing_bound_target(tmp_path: Path) -> None:
+    documents, legacy, state, plan = _apply_seeded_runtime(tmp_path)
+
+    with pytest.raises(PhaseBError, match="refuses a bound runtime target"):
+        runtime.recover_runtime(
+            documents,
+            legacy,
+            state,
+            expected_fingerprint=plan["fingerprint"],
+            build_runner=lambda _env: None,
+        )
+
+    assert (state / "migration" / "plan.json").is_file()
+    assert not list(state.parent.glob(".dashboard.recovery-*"))
+
+
+def test_recover_runtime_restores_partial_target_when_tasks_differ(tmp_path: Path) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    (legacy / "app-data" / "tasks.json").write_text(
+        '[{"id":"source-task","done":false}]\n',
+        encoding="utf-8",
+    )
+    plan = plan_runtime(documents, legacy, state)
+    original_tasks = state / "generated" / "tasks.json"
+    original_tasks.parent.mkdir(parents=True)
+    original_tasks.write_text('[{"id":"preserved-task","done":false}]\n', encoding="utf-8")
+
+    def build(env: dict[str, str]) -> None:
+        generated = Path(env["FAMILY_DASHBOARD_STATE_ROOT"]) / "generated"
+        generated.mkdir(parents=True)
+        (generated / "summary.json").write_text('{"value": 1}\n', encoding="utf-8")
+        (generated / "tasks.json").write_text(
+            '[{"id":"source-task","done":false}]\n',
+            encoding="utf-8",
+        )
+
+    with pytest.raises(PhaseBError, match="recovered tasks differ"):
+        runtime.recover_runtime(
+            documents,
+            legacy,
+            state,
+            expected_fingerprint=plan["fingerprint"],
+            build_runner=build,
+        )
+
+    assert json.loads(original_tasks.read_text(encoding="utf-8"))[0]["id"] == "preserved-task"
+    assert not list(state.parent.glob(".dashboard.recovery-*"))
+
+
 def test_apply_runtime_promotes_equal_fresh_builds_and_records_legacy_delta(tmp_path: Path) -> None:
     documents, legacy, state = _seed_runtime_source(tmp_path)
     plan = plan_runtime(documents, legacy, state)
@@ -739,6 +869,43 @@ def test_apply_runtime_cli_requires_explicit_roots_and_returns_json(
     )
     assert result == 0
     assert json.loads(capsys.readouterr().out)["status"] == "verified"
+
+
+def test_recover_runtime_cli_requires_explicit_roots_and_returns_json(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    documents, legacy, state = _seed_runtime_source(tmp_path)
+    fingerprint = plan_runtime(documents, legacy, state)["fingerprint"]
+    (state / "migration").mkdir(parents=True)
+    (state / "migration" / "partial.log").write_text("partial\n", encoding="utf-8")
+
+    def build(env: dict[str, str]) -> None:
+        generated = Path(env["FAMILY_DASHBOARD_STATE_ROOT"]) / "generated"
+        generated.mkdir(parents=True)
+        (generated / "summary.json").write_text('{"value": 1}\n', encoding="utf-8")
+
+    monkeypatch.setattr(phase_b, "_bun_build_runner", lambda _app_root: build, raising=False)
+    result = phase_b.main(
+        [
+            "recover-runtime",
+            "--documents-root",
+            str(documents),
+            "--legacy-app-root",
+            str(legacy),
+            "--state-root",
+            str(state),
+            "--expected-fingerprint",
+            fingerprint,
+            "--app-root",
+            str(tmp_path / "app"),
+            "--json",
+        ]
+    )
+
+    assert result == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "recovered"
 
 
 def test_verify_runtime_cli_requires_independent_expected_fingerprint(
