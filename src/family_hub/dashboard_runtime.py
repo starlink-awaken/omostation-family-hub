@@ -13,6 +13,7 @@ from typing import Any, Final
 import yaml
 
 PLAN_SCHEMA: Final = "family-dashboard-runtime-plan/v1"
+RECOVERY_SCHEMA: Final = "family-dashboard-runtime-recovery/v1"
 MANIFEST_NAMES: Final = ("summary", "members", "health", "growth", "daily", "assets")
 INPUT_CLOSURE_SCHEMA: Final = "family-dashboard-input-closure/v1"
 INPUT_TREE_NAMES: Final = ("_knowledge", "_archive", "_control")
@@ -183,13 +184,19 @@ def canonical_plan_fingerprint(plan: dict[str, Any]) -> str:
     return _canonical_digest(payload)
 
 
-def plan_runtime(documents_root: Path, legacy_app_root: Path, state_root: Path) -> dict[str, Any]:
+def _plan_runtime(
+    documents_root: Path,
+    legacy_app_root: Path,
+    state_root: Path,
+    *,
+    require_absent_target: bool,
+) -> dict[str, Any]:
     documents = _regular_root(documents_root, "Documents root")
     legacy = _regular_root(legacy_app_root, "legacy app root")
     target = _regular_root(state_root, "state root", must_exist=False)
     if not legacy.is_relative_to(documents):
         raise PhaseBError("legacy app must be below Documents")
-    if target.exists():
+    if require_absent_target and target.exists():
         raise PhaseBError("target must be absent")
     if target.is_relative_to(documents) or target.is_relative_to(legacy):
         raise PhaseBError("state root must be outside Documents")
@@ -232,6 +239,15 @@ def plan_runtime(documents_root: Path, legacy_app_root: Path, state_root: Path) 
     }
     plan["fingerprint"] = canonical_plan_fingerprint(plan)
     return plan
+
+
+def plan_runtime(documents_root: Path, legacy_app_root: Path, state_root: Path) -> dict[str, Any]:
+    return _plan_runtime(
+        documents_root,
+        legacy_app_root,
+        state_root,
+        require_absent_target=True,
+    )
 
 
 def plan_fingerprint(plan: dict[str, Any]) -> str:
@@ -433,6 +449,101 @@ def _remove_transaction_path(path: Path) -> None:
         shutil.rmtree(path)
     else:
         path.unlink()
+
+
+def _partial_runtime_inventory(target: Path) -> list[dict[str, Any]]:
+    metadata = os.lstat(target)
+    if not stat.S_ISDIR(metadata.st_mode) or target.is_symlink():
+        raise PhaseBError("partial runtime target must be a regular directory")
+    entries: list[dict[str, Any]] = []
+    for node in sorted(target.rglob("*"), key=lambda item: item.relative_to(target).as_posix()):
+        node_metadata = os.lstat(node)
+        if stat.S_ISDIR(node_metadata.st_mode):
+            continue
+        if not stat.S_ISREG(node_metadata.st_mode) or node.is_symlink():
+            raise PhaseBError("partial runtime target contains a non-regular node")
+        logical_path = node.relative_to(target).as_posix()
+        entries.append(
+            {
+                "path_digest": "sha256:" + hashlib.sha256(logical_path.encode()).hexdigest(),
+                "sha256": _sha(node),
+                "bytes": node_metadata.st_size,
+                "mode": oct(node_metadata.st_mode & 0o7777),
+            }
+        )
+    return entries
+
+
+def recover_runtime(
+    documents_root: Path,
+    legacy_app_root: Path,
+    state_root: Path,
+    *,
+    expected_fingerprint: str,
+    build_runner: BuildRunner,
+) -> dict[str, Any]:
+    target = _regular_root(state_root, "state root")
+    bound_plan = target / "migration" / "plan.json"
+    if bound_plan.exists() or bound_plan.is_symlink():
+        raise PhaseBError("partial runtime recovery refuses a bound runtime target")
+    inventory = _partial_runtime_inventory(target)
+    if not inventory:
+        raise PhaseBError("partial runtime target is empty")
+    inventory_digest = _fingerprint(inventory)
+    plan = _plan_runtime(
+        documents_root,
+        legacy_app_root,
+        state_root,
+        require_absent_target=False,
+    )
+    if plan_fingerprint(plan) != expected_fingerprint:
+        raise PhaseBError("source changed before partial runtime recovery")
+
+    original_tasks = target / "generated" / "tasks.json"
+    if original_tasks.exists() and (original_tasks.is_symlink() or not original_tasks.is_file()):
+        raise PhaseBError("partial runtime tasks must be a regular file")
+    original_tasks_digest = _sha(original_tasks) if original_tasks.exists() else None
+    suffix = expected_fingerprint.removeprefix("sha256:")[:12]
+    recovery = target.parent / f".dashboard.recovery-{suffix}-{inventory_digest.removeprefix('sha256:')[:12]}"
+    if recovery.exists() or recovery.is_symlink():
+        raise PhaseBError("partial runtime recovery collision")
+
+    os.replace(target, recovery)
+    try:
+        runtime_receipt = apply_runtime(
+            plan,
+            documents_root=documents_root,
+            legacy_app_root=legacy_app_root,
+            state_root=state_root,
+            expected_fingerprint=expected_fingerprint,
+            build_runner=build_runner,
+        )
+        recovered_tasks = target / "generated" / "tasks.json"
+        recovered_tasks_digest = _sha(recovered_tasks) if recovered_tasks.exists() else None
+        if original_tasks_digest != recovered_tasks_digest:
+            raise PhaseBError("recovered tasks differ from preserved partial runtime")
+        receipt: dict[str, Any] = {
+            "schema": RECOVERY_SCHEMA,
+            "status": "recovered",
+            "source_fingerprint": expected_fingerprint,
+            "partial_inventory": {
+                "file_count": len(inventory),
+                "aggregate_digest": inventory_digest,
+            },
+            "preserved_tasks": {
+                "status": "equal" if original_tasks_digest is not None else "absent",
+                "original_digest": original_tasks_digest,
+                "recovered_digest": recovered_tasks_digest,
+            },
+            "runtime_receipt": runtime_receipt,
+        }
+        _atomic_json(target / "migration" / "recovery.json", receipt)
+        return receipt
+    except BaseException:
+        _remove_transaction_path(target)
+        if recovery.exists():
+            os.replace(recovery, target)
+        raise
 
 
 def _run_build(build_runner: BuildRunner, documents_root: Path, staging: Path) -> None:
