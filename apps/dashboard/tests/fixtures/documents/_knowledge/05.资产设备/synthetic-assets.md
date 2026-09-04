@@ -1,5 +1,6 @@
 ---
 type: ssot
+last_updated: 2026-09-04
 title: Synthetic Assets
 tags: [synthetic]
 owner: governance-team
