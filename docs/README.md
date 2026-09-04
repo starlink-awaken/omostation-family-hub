@@ -1,3 +1,10 @@
+---
+type: derived
+source: projects/family-hub
+owner: governance-team
+last_updated: 2026-09-03
+---
+
 # Family Hub Documentation
 
 > X · 家庭数字枢纽

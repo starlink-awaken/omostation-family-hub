@@ -1,3 +1,10 @@
+---
+type: derived
+source: projects/family-hub
+owner: governance-team
+last_updated: 2026-09-03
+---
+
 # Family Dashboard App
 
 基于 Next.js 16 的家庭信息面板应用。应用会从仓库外部的家庭 SSOT 目录读取 Markdown/YAML 数据，构建出 `app-data/*.json`，再由前端页面消费。
