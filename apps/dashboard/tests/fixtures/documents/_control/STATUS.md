@@ -1,4 +1,5 @@
 ---
+type: ssot
 status: active
 last-reviewed: 2026-08-30
 ---

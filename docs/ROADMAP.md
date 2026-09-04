@@ -1,3 +1,9 @@
+---
+type: ssot
+owner: governance-team
+last_updated: 2026-09-03
+---
+
 # Family Hub Gamification Roadmap & Spec
 
 ## 1. 💡 创意与分析 (Ideation & PM Phase)

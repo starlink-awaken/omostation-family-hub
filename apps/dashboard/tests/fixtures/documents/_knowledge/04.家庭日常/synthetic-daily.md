@@ -1,4 +1,5 @@
 ---
+type: ssot
 title: Synthetic Daily
 tags: [synthetic]
 ---

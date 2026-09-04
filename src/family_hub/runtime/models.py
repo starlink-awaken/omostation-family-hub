@@ -5,13 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime, timezone
+from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Any
 
 
-class MigrationStatus(str, Enum):
+class MigrationStatus(StrEnum):
     PLANNED = "planned"
     STAGING = "staging"
     BUILDING = "building"
@@ -122,7 +122,7 @@ class MutationReceipt:
     original_sha256: str | None = None
     final_sha256: str | None = None
     rollback_sha256: str | None = None
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:

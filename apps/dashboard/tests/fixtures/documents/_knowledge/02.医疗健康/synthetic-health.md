@@ -1,4 +1,5 @@
 ---
+type: ssot
 title: Synthetic Health
 tags: [synthetic]
 ---

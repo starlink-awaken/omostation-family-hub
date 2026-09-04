@@ -1,3 +1,9 @@
+---
+type: ssot
+owner: governance-team
+last_updated: 2026-09-03
+---
+
 # family-hub — Call Chain
 
 > 本文档描述 family-hub 内部最核心的一条调用链 / 数据流。

@@ -1,3 +1,9 @@
+---
+type: ssot
+owner: governance-team
+last_updated: 2026-09-03
+---
+
 # Contributing to Family Hub
 
 > family digital hub and local task/data services
