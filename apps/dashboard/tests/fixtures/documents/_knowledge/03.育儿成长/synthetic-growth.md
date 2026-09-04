@@ -4,7 +4,7 @@ last_updated: 2026-09-04
 title: Synthetic Growth
 tags: [synthetic]
 owner: governance-team
-last-reviewed: 2026-09-04
+last_updated: 2026-09-04
 ---
 
 # Synthetic Growth
