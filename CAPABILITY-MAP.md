@@ -1,3 +1,9 @@
+---
+type: ssot
+owner: governance-team
+last_updated: 2026-09-03
+---
+
 # Family-Hub 能力地图
 
 > 家庭中心 · 任务 gamification 与成长激励

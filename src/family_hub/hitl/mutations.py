@@ -9,8 +9,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
-from .proposals import ProposalOperation
 from ..runtime.models import compute_sha256
+from .proposals import ProposalOperation
 
 
 class MutationHandler(ABC):

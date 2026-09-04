@@ -1,3 +1,9 @@
+---
+type: ssot
+owner: governance-team
+last_updated: 2026-09-03
+---
+
 # Governance
 
 Workspace governance is defined by the [omostation governance entry point](https://github.com/starlink-awaken/omostation/blob/main/GOVERNANCE.md).

@@ -50,7 +50,7 @@ class MigrationPlanner:
         self.documents_root = Path(documents_root)
         self.target_root = Path(target_root)
         self.staging_root = Path(staging_root) if staging_root else None
-        self.plan_id = plan_id or f"migration-{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+        self.plan_id = plan_id or f"migration-{datetime.datetime.now(datetime.UTC).strftime('%Y%m%dT%H%M%SZ')}"
         self._plan: MigrationPlan | None = None
         self._receipt: MigrationReceipt | None = None
         self._parity: ParityReport | None = None
@@ -67,7 +67,7 @@ class MigrationPlanner:
 
         plan = MigrationPlan(
             plan_id=self.plan_id,
-            created_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            created_at=datetime.datetime.now(datetime.UTC).isoformat(),
             documents_root=self.documents_root,
             staging_root=self.staging_root or Path(tempfile.mkdtemp(prefix="family-hub-staging-")),
             target_root=self.target_root,
@@ -134,7 +134,7 @@ class MigrationPlanner:
 
         report = ParityReport(
             parity_id=f"parity-{self.plan_id}",
-            created_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            created_at=datetime.datetime.now(datetime.UTC).isoformat(),
             compared_count=compared,
             mismatches=mismatches,
             ok=len(mismatches) == 0,
@@ -193,7 +193,7 @@ class MigrationPlanner:
         receipt = MigrationReceipt(
             receipt_id=f"receipt-{self.plan_id}",
             plan_id=self.plan_id,
-            created_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            created_at=datetime.datetime.now(datetime.UTC).isoformat(),
             target_root=str(target),
             manifest_count=len(self._plan.manifests),
             generated_count=len(self._plan.generated),
@@ -217,7 +217,7 @@ class MigrationPlanner:
         receipt = self._receipt or MigrationReceipt(
             receipt_id=f"receipt-{self.plan_id}",
             plan_id=self.plan_id,
-            created_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            created_at=datetime.datetime.now(datetime.UTC).isoformat(),
             target_root=str(target),
             manifest_count=len(self._plan.manifests),
             generated_count=len(self._plan.generated),

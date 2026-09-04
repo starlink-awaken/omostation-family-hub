@@ -1,3 +1,9 @@
+---
+type: ssot
+owner: governance-team
+last_updated: 2026-09-03
+---
+
 # CLAUDE.md — Family Hub AI Context
 
 > Session loader for AI work inside `family-hub`.

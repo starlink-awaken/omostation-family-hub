@@ -8,17 +8,17 @@ from pathlib import Path
 import pytest
 
 from family_hub.runtime.models import (
-    ManifestFile,
     GeneratedProduct,
+    ManifestFile,
     MigrationPlan,
     MigrationReceipt,
     MigrationStatus,
-    ParityReport,
     MutationReceipt,
+    ParityReport,
     compute_sha256,
     normalize_json,
 )
-from family_hub.runtime.planner import MigrationPlanner, MigrationError, ParityReceipt, MANIFEST_COUNT
+from family_hub.runtime.planner import MANIFEST_COUNT, MigrationError, MigrationPlanner, ParityReceipt
 
 
 class TestModels:

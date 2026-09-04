@@ -1,3 +1,9 @@
+---
+type: ssot
+owner: governance-team
+last_updated: 2026-09-03
+---
+
 # 定时任务（Cron）配置
 
 家庭驾驶舱有三个内部 API 路由需要外部 cron 服务触发。

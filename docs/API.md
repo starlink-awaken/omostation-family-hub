@@ -1,3 +1,9 @@
+---
+type: ssot
+owner: governance-team
+last_updated: 2026-09-03
+---
+
 # Family Hub API / Usage Reference
 
 > Quick reference for using **Family Hub** programmatically and from the command line.

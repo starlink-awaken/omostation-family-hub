@@ -14,8 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .proposals import ProposalSchema, ProposalOperation
 from ..runtime.models import MutationReceipt, compute_sha256
+from .proposals import ProposalOperation, ProposalSchema
 
 
 class MutationError(Exception):
@@ -143,7 +143,7 @@ class HitlTransactionOwner:
                 "target": proposal.target_relative,
                 "original_sha256": original_sha256,
                 "payload_sha256": proposal.payload_sha256,
-                "prepared_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "prepared_at": datetime.datetime.now(datetime.UTC).isoformat(),
             }
             (mutation_dir / "prepared.json").write_text(json.dumps(prepared, indent=2))
 
@@ -181,7 +181,7 @@ class HitlTransactionOwner:
                 "mutation_id": mutation_id,
                 "applied": True,
                 "final_sha256": applied_sha256,
-                "applied_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "applied_at": datetime.datetime.now(datetime.UTC).isoformat(),
             }
             (mutation_dir / "apply.json").write_text(json.dumps(apply, indent=2))
 
@@ -189,7 +189,7 @@ class HitlTransactionOwner:
                 "mutation_id": mutation_id,
                 "verified": True,
                 "final_sha256": applied_sha256,
-                "verified_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "verified_at": datetime.datetime.now(datetime.UTC).isoformat(),
             }
             (mutation_dir / "verify.json").write_text(json.dumps(verify, indent=2))
 
@@ -303,7 +303,7 @@ class HitlTransactionOwner:
             "mutation_id": mutation_id,
             "rolled_back": True,
             "rollback_sha256": rollback_sha256,
-            "rolled_back_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "rolled_back_at": datetime.datetime.now(datetime.UTC).isoformat(),
         }
         (mutation_dir / "rollback.json").write_text(json.dumps(rollback, indent=2))
 

@@ -8,15 +8,15 @@ from pathlib import Path
 
 import pytest
 
+from family_hub.hitl.owner import HitlTransactionOwner, MutationError
 from family_hub.hitl.proposals import (
+    _TARGET_PATTERN,
+    ProposalOperation,
     ProposalSchema,
     ProposalType,
-    ProposalOperation,
     ProposalValidationError,
     validate_proposal,
-    _TARGET_PATTERN,
 )
-from family_hub.hitl.owner import HitlTransactionOwner, MutationError
 from family_hub.runtime.models import compute_sha256
 
 

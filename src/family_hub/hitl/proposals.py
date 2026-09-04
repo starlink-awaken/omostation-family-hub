@@ -7,16 +7,16 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Any
 
 
-class ProposalType(str, Enum):
+class ProposalType(StrEnum):
     FAMILY_DASHBOARD_DOCUMENT_WRITE = "family_dashboard_document_write"
 
 
-class ProposalOperation(str, Enum):
+class ProposalOperation(StrEnum):
     REPLACE_TEXT = "replace_text"
     VACCINE_UPDATE = "vaccine_update"
     MILESTONE_ACHIEVE = "milestone_achieve"
@@ -42,7 +42,7 @@ class ProposalSchema:
     risk_level: str = "L3"
     approval_required: bool = True
     auto_apply: bool = False
-    created_at: str = field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.datetime.now(datetime.UTC).isoformat())
     idempotency_key: str = ""
 
     def canonical_digest(self) -> str:

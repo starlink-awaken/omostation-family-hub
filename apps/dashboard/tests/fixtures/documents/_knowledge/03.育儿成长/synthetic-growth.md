@@ -1,4 +1,5 @@
 ---
+type: ssot
 title: Synthetic Growth
 tags: [synthetic]
 ---
