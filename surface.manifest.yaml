@@ -1,0 +1,77 @@
+schema_version: surface-manifest/v1
+extension_id: family-hub
+domain: user
+title: "Family Hub 家庭智能中枢"
+description: "家庭数字资产管理、健康档案与成员协同卡片"
+refresh_interval_ms: 10000
+cards:
+  - id: family-hub-kpi
+    type: metric_grid
+    title: "家庭空间运行状态"
+    static_data:
+      metrics:
+        - label: "家庭成员在线"
+          value: "4 / 4"
+          unit: "人"
+          status: "normal"
+          description: "全部在线"
+        - label: "关键资产健康度"
+          value: "98%"
+          trend: "up"
+          status: "normal"
+          description: "数据保险库加密正常"
+        - label: "待审看护事项"
+          value: "2"
+          unit: "项"
+          trend: "neutral"
+          status: "warning"
+          warn_threshold: 1.0
+          description: "需要监护人确认"
+  - id: family-hub-tasks
+    type: data_table
+    title: "家庭重要事项清单"
+    static_data:
+      columns:
+        - key: task
+          label: "事项名称"
+        - key: member
+          label: "关联成员"
+        - key: priority
+          label: "优先级"
+        - key: status
+          label: "处理状态"
+      rows:
+        - task: "医疗保险年度复核"
+          member: "长辈"
+          priority: "高"
+          status: "待签署"
+        - task: "分布式备份介质巡检"
+          member: "全员"
+          priority: "中"
+          status: "已完成"
+        - task: "家庭相册多地异地同步"
+          member: "全员"
+          priority: "低"
+          status: "同步中"
+  - id: family-hub-actions
+    type: action_panel
+    title: "核心协同操作"
+    static_data:
+      description: "一键发起家庭协同流程"
+      actions:
+        - id: trigger-sync
+          label: "立即同步家庭知识库"
+          variant: "primary"
+          payload:
+            target: "vault"
+        - id: export-brief
+          label: "导出家庭晨报"
+          variant: "secondary"
+          payload:
+            format: "markdown"
+        - id: emergency-alert
+          label: "紧急健康广播"
+          variant: "danger"
+          confirm: true
+          payload:
+            level: "critical"
