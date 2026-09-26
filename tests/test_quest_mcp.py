@@ -259,7 +259,7 @@ class TestExportToGbrain:
 class TestGenerateSmartQuests:
     def test_generate_success(self, tmp_db):
         mock_response = {
-            "content": '[{"title": "AI Quest", "type": "wisdom", "reward": 75}]',
+            "choices": [{"message": {"content": '[{"title": "AI Quest", "type": "wisdom", "reward": 75}]'}}],
             "model": "test-model",
         }
         with patch("urllib.request.urlopen") as mock_urlopen:

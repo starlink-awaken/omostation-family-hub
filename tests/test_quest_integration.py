@@ -277,7 +277,13 @@ class TestSmartQuestGeneration:
         # We need to mock the actual LLM response content
         llm_response = json.dumps(
             {
-                "content": '[{"title": "AI学习", "type": "wisdom", "reward": 75}, {"title": "打扫房间", "type": "household", "reward": 30}]',
+                "choices": [
+                    {
+                        "message": {
+                            "content": '[{"title": "AI学习", "type": "wisdom", "reward": 75}, {"title": "打扫房间", "type": "household", "reward": 30}]'
+                        }
+                    }
+                ],
                 "model": "test-model",
             }
         )
