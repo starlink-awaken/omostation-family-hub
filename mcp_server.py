@@ -237,10 +237,10 @@ def generate_smart_quests(assignee: str) -> dict:
     )
 
     # Payload for llm-gateway HTTP API
-    llm_gateway_url = os.environ.get("LLM_GATEWAY_URL", "http://localhost:9290")
-    data = json.dumps({"prompt": prompt}).encode("utf-8")
+    llm_gateway_url = os.environ.get("LLM_GATEWAY_URL", "http://127.0.0.1:4000")
+    data = json.dumps({"model": "fast", "messages": [{"role": "user", "content": prompt}]}).encode("utf-8")
     req = urllib.request.Request(
-        f"{llm_gateway_url}/v1/generate", data=data, headers={"Content-Type": "application/json"}
+        f"{llm_gateway_url}/v1/chat/completions", data=data, headers={"Content-Type": "application/json"}
     )
 
     try:
@@ -250,7 +250,7 @@ def generate_smart_quests(assignee: str) -> dict:
         if "error" in resp_body:
             return {"error": f"LLM Gateway returned error: {resp_body['error']}"}
 
-        content = resp_body.get("content", "")
+        content = (resp_body.get("choices") or [{}])[0].get("message", {}).get("content", "")
         quests = [_normalize_generated_quest(item, assignee) for item in _extract_json_array(content)]
         if not quests:
             return {"error": "LLM Gateway returned an empty quest list"}

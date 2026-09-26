@@ -82,13 +82,19 @@ class GenerateSmartQuestsTests(unittest.TestCase):
 
     def test_generate_smart_quests_persists_normalized_items(self) -> None:
         payload = {
-            "content": """这里是任务：
+            "choices": [
+                {
+                    "message": {
+                        "content": """这里是任务：
 ```json
 [
   {"title": "读绘本", "type": "wisdom", "reward": "40"},
   {"title": "整理玩具", "type": "household", "reward": 60}
 ]
-```""",
+```"""
+                    }
+                }
+            ],
             "model": "mock-model",
         }
 
