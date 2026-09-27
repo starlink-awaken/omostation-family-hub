@@ -2,6 +2,7 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,23 @@ from fastmcp import FastMCP
 DB_PATH = Path(__file__).parent / "family_hub.db"
 
 mcp = FastMCP("family-hub")
+
+
+def _gateway_auth() -> dict[str, str]:
+    """门面对 /v1/* 一律要求 Bearer(此前不带鉴权 → 恒 401)。env → macOS Keychain(aetherforge-gateway)。"""
+    key = os.environ.get("LLM_GATEWAY_KEY") or os.environ.get("AETHERFORGE_API_KEY") or ""
+    if not key:
+        try:
+            out = subprocess.run(
+                ["security", "find-generic-password", "-s", "aetherforge-gateway", "-w"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            key = out.stdout.strip() if out.returncode == 0 else ""
+        except (OSError, subprocess.TimeoutExpired):
+            key = ""
+    return {"Authorization": f"Bearer {key}"} if key else {}
 
 
 def _get_db():
@@ -240,11 +258,14 @@ def generate_smart_quests(assignee: str) -> dict:
     llm_gateway_url = os.environ.get("LLM_GATEWAY_URL", "http://127.0.0.1:4000")
     data = json.dumps({"model": "fast", "messages": [{"role": "user", "content": prompt}]}).encode("utf-8")
     req = urllib.request.Request(
-        f"{llm_gateway_url}/v1/chat/completions", data=data, headers={"Content-Type": "application/json"}
+        f"{llm_gateway_url}/v1/chat/completions",
+        data=data,
+        headers={"Content-Type": "application/json", **_gateway_auth()},
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=10.0) as response:
+        # 快档冷加载可达数十秒, 10s 超时会把正常请求判成失败
+        with urllib.request.urlopen(req, timeout=180.0) as response:
             resp_body = json.loads(response.read().decode("utf-8"))
 
         if "error" in resp_body:
