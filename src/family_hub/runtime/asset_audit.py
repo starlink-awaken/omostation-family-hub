@@ -17,7 +17,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-
 # ── Data Models ──
 
 @dataclass
@@ -61,6 +60,41 @@ class ContractRisk:
 
 # ── Bank Statement Parser ──
 
+# 国内银行导出常见表头(英文表头保持兼容)
+_DATE_COLS = ("date", "Date", "交易日期", "记账日期", "日期", "交易时间")
+_AMOUNT_COLS = ("amount", "Amount", "交易金额", "金额", "发生额")
+_CATEGORY_COLS = ("category", "Category", "摘要", "交易类型", "用途")
+_DESC_COLS = ("description", "Description", "对方户名", "交易对方", "备注", "附言")
+
+
+def _first(row: dict[str, str], cols: tuple[str, ...]) -> str | None:
+    for c in cols:
+        v = row.get(c)
+        if v is not None and str(v).strip() != "":
+            return str(v).strip()
+    return None
+
+
+def _to_amount(raw: str | None) -> float | None:
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        return float(str(raw).replace(",", "").replace("¥", "").replace("￥", "").strip())
+    except ValueError:
+        return None
+
+
+def _row_amount(row: dict[str, str]) -> float | None:
+    """单列金额(正收负支), 或「收入金额/支出金额」分两列。"""
+    single = _to_amount(_first(row, _AMOUNT_COLS))
+    if single is not None:
+        return single
+    income, expense = _to_amount(row.get("收入金额")), _to_amount(row.get("支出金额"))
+    if income is None and expense is None:
+        return None
+    return (income or 0.0) - abs(expense or 0.0)
+
+
 class BankStatementParser:
     """银行流水解析器 (CSV/OFX/PDF).
 
@@ -102,16 +136,14 @@ class BankStatementParser:
         reader = csv.DictReader(io.StringIO(content))
 
         for row in reader:
-            try:
-                amount = float(row.get("amount", row.get("Amount", "0")))
-            except (ValueError, TypeError):
+            amount = _row_amount(row)
+            if amount is None:  # 没有金额列/金额无法解析: 跳过, 不能当 0 记(此前中文表头整月记成 0)
                 continue
-
             tx = Transaction(
-                date=row.get("date", row.get("Date", "")),
+                date=_first(row, _DATE_COLS) or "",
                 amount=amount,
-                category=row.get("category", row.get("Category", "uncategorized")),
-                description=row.get("description", row.get("Description", "")),
+                category=_first(row, _CATEGORY_COLS) or "uncategorized",
+                description=_first(row, _DESC_COLS) or "",
                 raw=dict(row),
             )
             transactions.append(tx)
@@ -163,10 +195,17 @@ class LargeExpenseDetector:
         mean = statistics.mean(amounts)
         std = statistics.stdev(amounts)
         threshold = mean + self.sigma_threshold * std
+        # 均值/标准差会被离群点本身拉大(样本少时最明显: 6 笔支出里 38000 的装修款拉高
+        # 标准差后掩护了自己)。补一道修正 z 分数(中位数 + MAD, Iglewicz-Hoaglin 3.5), 任一命中即预警。
+        median = statistics.median(amounts)
+        mad = statistics.median(abs(a - median) for a in amounts)
+
+        def _robust_outlier(a: float) -> bool:
+            return mad > 0 and 0.6745 * (a - median) / mad > 3.5
 
         alerts: list[RiskAlert] = []
         for tx in expenses:
-            if abs(tx.amount) > threshold:
+            if abs(tx.amount) > threshold or _robust_outlier(abs(tx.amount)):
                 alerts.append(RiskAlert(
                     level="warning",
                     type="large_expense",
