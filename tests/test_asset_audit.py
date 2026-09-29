@@ -21,7 +21,6 @@ from family_hub.runtime.asset_audit import (
     Transaction,
 )
 
-
 # ── Fixtures ──
 
 SAMPLE_CSV = """date,amount,category,description
@@ -241,3 +240,27 @@ class TestAssetAuditEngine:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-q"])
+
+
+def test_parse_csv_chinese_bank_headers():
+    """国内银行导出用中文表头; 此前找不到 amount 列时记成 0, 整月流水金额全为 0。"""
+    content = "交易日期,交易金额,摘要,对方户名\n2026-09-05,\"28,500.00\",工资,区卫健委\n2026-09-12,-38000.00,装修尾款,装饰公司\n"
+    txs = BankStatementParser().parse(content)
+    assert [(t.date, t.amount, t.category, t.description) for t in txs] == [
+        ("2026-09-05", 28500.0, "工资", "区卫健委"),
+        ("2026-09-12", -38000.0, "装修尾款", "装饰公司"),
+    ]
+
+
+def test_parse_csv_split_income_expense_columns_and_skip_missing_amount():
+    content = "记账日期,收入金额,支出金额,用途\n2026-09-05,3200,,稿费\n2026-09-06,,518.00,燃气电费\n2026-09-07,,,无金额\n"
+    txs = BankStatementParser().parse(content)
+    assert [t.amount for t in txs] == [3200.0, -518.0]
+
+
+def test_detect_large_expense_not_masked_by_itself():
+    """样本少时离群点会拉大标准差掩护自己; 常规房贷不应被误报。"""
+    amounts = [9200, 1860.5, 38000, 642.3, 2400, 518]
+    txs = [Transaction(f"2026-09-{i + 1:02d}", -a, "c", f"支出{a}") for i, a in enumerate(amounts)]
+    flagged = {a.details["amount"] for a in LargeExpenseDetector().detect(txs)}
+    assert flagged == {38000}
