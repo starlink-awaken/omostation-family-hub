@@ -9,7 +9,7 @@ status: active
 
 # Family Hub Architecture
 
-> Architecture overview for **Family Hub**. For the full workspace architecture, see [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md).
+> Architecture overview for **Family Hub**. For the full workspace architecture, see [`../../../ARCHITECTURE.md`](../../../ARCHITECTURE.md).
 
 ## Responsibilities
 
